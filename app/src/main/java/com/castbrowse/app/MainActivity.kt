@@ -509,101 +509,107 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.width(4.dp))
                         }
  
-                        // Address / search field
-                        BasicTextField(
-                            value = urlTextFieldValue,
-                            onValueChange = { newValue: androidx.compose.ui.text.input.TextFieldValue ->
-                                urlTextFieldValue = newValue
-                                val layout = textLayoutResult
-                                if (layout != null) {
-                                    val cursorIndex = newValue.selection.end
-                                    if (cursorIndex >= 0 && cursorIndex <= newValue.text.length) {
-                                        coroutineScope.launch {
-                                            try {
-                                                val cursorRect = layout.getCursorRect(cursorIndex)
-                                                bringIntoViewRequester.bringIntoView(cursorRect)
-                                            } catch (e: Exception) {}
-                                        }
-                                    }
-                                }
-                            },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Search,
-                                // Prevents the keyboard from adding browsed URLs to its learned dictionary and triggers visual incognito mode in Gboard
-                                platformImeOptions = androidx.compose.ui.text.input.PlatformImeOptions(
-                                    privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning,incognito"
-                                )
-                            ),
-                            keyboardActions = KeyboardActions(onSearch = {
-                                handleUrlInput(urlTextFieldValue.text)
-                            }),
-                            singleLine = true, // Force single line horizontal scrolling
-                            maxLines = 1,
-                            textStyle = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 18.sp,
-                                platformStyle = PlatformTextStyle(
-                                    includeFontPadding = false
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface
-                            ),
-                            onTextLayout = { layout: androidx.compose.ui.text.TextLayoutResult -> 
-                                textLayoutResult = layout 
-                            },
+                        // Address / search field container
+                        Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(44.dp)
-                                .bringIntoViewRequester(bringIntoViewRequester)
-                                .onFocusChanged { focusState ->
-                                    addressBarFocused = focusState.isFocused
-                                },
-                            decorationBox = { innerTextField ->
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(22.dp))
-                                        .background(
-                                            if (addressBarFocused) MaterialTheme.colorScheme.surface
-                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                        )
-                                        .border(
-                                            width = if (addressBarFocused) 2.dp else 1.dp,
-                                            color = if (addressBarFocused) MaterialTheme.colorScheme.primary 
-                                                    else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                            shape = RoundedCornerShape(22.dp)
-                                        )
-                                        .padding(horizontal = 16.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.weight(1f),
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            innerTextField()
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(
+                                    if (addressBarFocused) MaterialTheme.colorScheme.surface
+                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                                .border(
+                                    width = if (addressBarFocused) 2.dp else 1.dp,
+                                    color = if (addressBarFocused) MaterialTheme.colorScheme.primary 
+                                            else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                                    shape = RoundedCornerShape(22.dp)
+                                )
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+                                val androidColor = remember(onSurfaceColor) {
+                                    android.graphics.Color.argb(
+                                        (onSurfaceColor.alpha * 255).toInt(),
+                                        (onSurfaceColor.red * 255).toInt(),
+                                        (onSurfaceColor.green * 255).toInt(),
+                                        (onSurfaceColor.blue * 255).toInt()
+                                    )
+                                }
+                                
+                                androidx.compose.ui.viewinterop.AndroidView(
+                                    factory = { ctx ->
+                                        val editText = IncognitoEditText(ctx)
+                                        editText.background = null
+                                        editText.setSingleLine(true)
+                                        editText.maxLines = 1
+                                        editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+                                        editText.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                                        editText.textSize = 16f
+                                        
+                                        // Handle focus changes
+                                        editText.setOnFocusChangeListener { _, hasFocus ->
+                                            addressBarFocused = hasFocus
                                         }
-                                        if (addressBarFocused && urlTextFieldValue.text.isNotEmpty()) {
-                                            IconButton(
-                                                onClick = {
-                                                    urlTextFieldValue = androidx.compose.ui.text.input.TextFieldValue("")
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Clear,
-                                                    contentDescription = "Clear address",
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
+                                        
+                                        // Handle search action
+                                        editText.setOnEditorActionListener { _, actionId, _ ->
+                                            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                                                handleUrlInput(editText.text.toString())
+                                                true
+                                            } else {
+                                                false
                                             }
                                         }
+                                        
+                                        // Keep Compose state in sync
+                                        editText.addTextChangedListener(object : android.text.TextWatcher {
+                                            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                                            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                                                val currentText = s?.toString() ?: ""
+                                                if (urlTextFieldValue.text != currentText) {
+                                                    urlTextFieldValue = urlTextFieldValue.copy(text = currentText)
+                                                }
+                                            }
+                                            override fun afterTextChanged(s: android.text.Editable?) {}
+                                        })
+                                        editText
+                                    },
+                                    update = { view ->
+                                        view.setTextColor(androidColor)
+                                        val currentText = urlTextFieldValue.text
+                                        if (view.text?.toString() != currentText) {
+                                            view.setText(currentText)
+                                            if (addressBarFocused) {
+                                                view.selectAll()
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                if (addressBarFocused && urlTextFieldValue.text.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = {
+                                            urlTextFieldValue = androidx.compose.ui.text.input.TextFieldValue("")
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = "Clear address",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
                                 }
                             }
-                        )
+                        }
                         
                         if (!addressBarFocused) {
                             Spacer(modifier = Modifier.width(8.dp))
@@ -1710,3 +1716,19 @@ val CopyIcon = androidx.compose.ui.graphics.vector.ImageVector.Builder(
     verticalLineTo(21f)
     close()
 }.build()
+
+class IncognitoEditText @JvmOverloads constructor(
+    context: android.content.Context,
+    attrs: android.util.AttributeSet? = null,
+    defStyleAttr: Int = android.R.attr.editTextStyle
+) : android.widget.EditText(context, attrs, defStyleAttr) {
+    override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo?): android.view.inputmethod.InputConnection? {
+        val connection = super.onCreateInputConnection(outAttrs)
+        if (outAttrs != null) {
+            // Apply standard no-personalized-learning flag and incognito private IME hint
+            outAttrs.imeOptions = outAttrs.imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            outAttrs.privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning,incognito"
+        }
+        return connection
+    }
+}

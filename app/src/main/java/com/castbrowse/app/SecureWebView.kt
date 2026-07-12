@@ -88,4 +88,14 @@ class SecureWebView @JvmOverloads constructor(
             e.printStackTrace()
         }
     }
+
+    override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo?): android.view.inputmethod.InputConnection? {
+        val connection = super.onCreateInputConnection(outAttrs)
+        if (outAttrs != null) {
+            // Force keyboard's incognito mode (no personalized learning + visual theme hint) for all inputs inside WebView
+            outAttrs.imeOptions = outAttrs.imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            outAttrs.privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning,incognito"
+        }
+        return connection
+    }
 }
