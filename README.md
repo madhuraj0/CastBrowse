@@ -47,8 +47,8 @@ Output: `app/build/outputs/apk/release/app-release.apk`
 
 ## 👥 Collaborators
 
-* **User** ([madhuraj0](https://github.com/madhuraj0))
-* **Antigravity** (AI coding assistant)
+* **[madhuraj0](https://github.com/madhuraj0)**: Conceived the application, designed the UI layout, economic address bar, AMOLED/dynamic themes, and tested media features.
+* **Antigravity** (AI Assistant): Coded the Android application, built the local proxy helper, and handled casting protocols.
 
 ---
 
