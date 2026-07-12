@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- TV Screen Outline (Thick, minimal rounded rect) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M37,36 h34 a4,4 0 0,1 4,4 v24 a4,4 0 0,1 -4,4 h-34 a4,4 0 0,1 -4,-4 v-24 a4,4 0 0,1 4,-4 z" />
+        
+    <!-- TV Stand -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,68 h6 v4 h-6 z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M44,72 h20" />
+        
+    <!-- Casting Waves in bottom-left inside TV screen -->
+    <!-- Dot (Center of cast waves) -->
+    <path
+        android:fillColor="#06B6D4"
+        android:pathData="M41,60 A 2.2,2.2 0 1,1 41,59.99 z" />
+        
+    <!-- Wave Arc 1 -->
+    <path
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M41,52 A 8,8 0 0,1 49,60" />
+        
+    <!-- Wave Arc 2 -->
+    <path
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M41,44 A 16,16 0 0,1 57,60" />
+        
+    <!-- Play symbol in the center-right of the TV screen -->
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M60,45 l9,5 l-9,5 z" />
+        
+</vector>
