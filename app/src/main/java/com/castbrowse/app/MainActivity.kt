@@ -529,7 +529,11 @@ class MainActivity : ComponentActivity() {
                             },
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Uri,
-                                imeAction = ImeAction.Search
+                                imeAction = ImeAction.Search,
+                                // Prevents the keyboard from adding browsed URLs to its learned dictionary and triggers visual incognito mode in Gboard
+                                platformImeOptions = androidx.compose.ui.text.input.PlatformImeOptions(
+                                    privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning,incognito"
+                                )
                             ),
                             keyboardActions = KeyboardActions(onSearch = {
                                 handleUrlInput(urlTextFieldValue.text)
@@ -1150,26 +1154,39 @@ class MainActivity : ComponentActivity() {
 
         // Theme selection dialog
         if (showThemeDialog) {
-            AlertDialog(
-                onDismissRequest = { showThemeDialog = false },
-                title = { Text("Choose Theme", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Dialog(onDismissRequest = { showThemeDialog = false }) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier.width(280.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Choose Theme",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
                         listOf(
                             "light" to "Light",
                             "dark" to "Dark",
                             "amoled" to "AMOLED Black",
                             "system" to "System Default",
-                            "dynamic" to "Material You (Dynamic)"
+                            "dynamic" to "Material You"
                         ).forEach { (mode, label) ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
                                     .clickable {
                                         onThemeModeChange(mode)
                                         showThemeDialog = false
                                     }
-                                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                                    .padding(vertical = 8.dp, horizontal = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 RadioButton(
@@ -1177,22 +1194,16 @@ class MainActivity : ComponentActivity() {
                                     onClick = {
                                         onThemeModeChange(mode)
                                         showThemeDialog = false
-                                    }
+                                    },
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Text(label, style = MaterialTheme.typography.bodyLarge)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(label, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showThemeDialog = false }) {
-                        Text("Cancel")
-                    }
-                },
-                shape = RoundedCornerShape(24.dp),
-                containerColor = MaterialTheme.colorScheme.surface
-            )
+                }
+            }
         }
 
         // About & Credits dialog
@@ -1211,7 +1222,7 @@ class MainActivity : ComponentActivity() {
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
-                            "Credits:\n• FCast protocol & client\n• Kotlin Coroutines\n• Jetpack Compose\n• OkHttp & SSDP Discovery",
+                            "Credits:\n• FCast protocol & client\n• Steven Black's Adblock Hosts\n• Kotlin Coroutines\n• Jetpack Compose\n• OkHttp & SSDP Discovery\n\nCollaborators:\n• madhuraj0 (Idea, Design direction, Testing)\n• Antigravity (AI Assistant)",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }

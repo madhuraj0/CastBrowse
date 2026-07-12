@@ -1,6 +1,7 @@
 package com.castbrowse.app
 
 import android.os.Bundle
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -58,6 +59,8 @@ class CastWizardActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Block screenshots and screen recording on the setup wizard (contains device IP/port info)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         discoveryService = SsdpDiscoveryService(this)
 
         val prefs = EncryptedStorage.getPreferences(this)
@@ -617,7 +620,12 @@ class CastWizardActivity : ComponentActivity() {
                         label = { Text("Default TCP Port") },
                         shape = RoundedCornerShape(12.dp),
                         maxLines = 1,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            platformImeOptions = androidx.compose.ui.text.input.PlatformImeOptions(
+                                privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning"
+                            )
+                        ),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,

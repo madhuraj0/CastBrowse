@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext traffic for local networks/devices (DLNA/UPnP control URLs use HTTP) -->
-    <base-config cleartextTrafficPermitted="true">
+    <!--
+        HARDENED: cleartext HTTP is restricted to local network ranges only.
+        Public internet traffic is always forced over TLS (enforced by WebViewClient.shouldOverrideUrlLoading).
+        Local network cleartext is required for DLNA/UPnP control URLs and FCast TCP protocol.
+    -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!-- Allow cleartext for RFC-1918 local ranges (FCast receivers, DLNA) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
 </network-security-config>
