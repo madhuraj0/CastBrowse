@@ -379,6 +379,7 @@ class MainActivity : ComponentActivity() {
         var showMoreActionsSheet by remember { mutableStateOf(false) }
         var showThemeDialog by remember { mutableStateOf(false) }
         var showCreditsDialog by remember { mutableStateOf(false) }
+        var showHistoryDialog by remember { mutableStateOf(false) }
         var detailedVideoForDialog by remember { mutableStateOf<ExtractedVideo?>(null) }
         val prefs = remember { EncryptedStorage.getPreferences(context) }
         var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
@@ -739,7 +740,18 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
 
-                                // 4b. Record History
+                                // 4b. View History
+                                DropdownMenuItem(
+                                    text = { Text("View History") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                    onClick = {
+                                        showMoreActionsSheet = false
+                                        showHistoryDialog = true
+                                    }
+                                )
+
+                                // 4c. Record History
                                 DropdownMenuItem(
                                     text = { Text("Record History") },
                                     leadingIcon = {
@@ -1214,6 +1226,96 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        // History Dialog
+        if (showHistoryDialog) {
+            val historyEntries = remember(showHistoryDialog) {
+                val raw = prefs.getString("history_json", "[]") ?: "[]"
+                val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+                (0 until arr.length()).map { i ->
+                    val obj = arr.getJSONObject(i)
+                    Pair(obj.getString("url"), obj.getLong("ts"))
+                }
+            }
+            var historyList by remember { mutableStateOf(historyEntries) }
+
+            AlertDialog(
+                onDismissRequest = { showHistoryDialog = false },
+                title = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (historyList.isNotEmpty()) {
+                            TextButton(onClick = {
+                                prefs.edit().putString("history_json", "[]").apply()
+                                historyList = emptyList()
+                            }) {
+                                Text("Clear All", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                },
+                text = {
+                    if (historyList.isEmpty()) {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "No history yet. Enable \"Record History\" in the menu.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(historyList) { (url, ts) ->
+                                val dateStr = remember(ts) {
+                                    java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
+                                }
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            showHistoryDialog = false
+                                            webView?.loadUrl(url)
+                                        },
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                        Text(
+                                            text = url,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            text = dateStr,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showHistoryDialog = false }) { Text("Close") }
+                },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        }
+
         // Redesigned Cast Streams Selection Dialog
         if (showCastDialog) {
             Dialog(onDismissRequest = { showCastDialog = false }) {
@@ -1484,11 +1586,23 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun recordUrlToHistory(context: Context, url: String) {
+        // Skip internal/blank pages
+        if (url.isBlank() || url == "about:blank") return
         val prefs = EncryptedStorage.getPreferences(context)
-        val historySet = prefs.getStringSet("history_items", emptySet()) ?: emptySet()
-        val newSet = historySet.toMutableSet()
-        newSet.add(url)
-        prefs.edit().putStringSet("history_items", newSet).apply()
+        val raw = prefs.getString("history_json", "[]") ?: "[]"
+        val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+        // Build new entry with timestamp
+        val entry = org.json.JSONObject().apply {
+            put("url", url)
+            put("ts", System.currentTimeMillis())
+        }
+        // Prepend newest entry at index 0
+        val newArr = org.json.JSONArray()
+        newArr.put(entry)
+        // Keep at most 500 entries
+        val limit = minOf(arr.length(), 499)
+        for (i in 0 until limit) newArr.put(arr.getJSONObject(i))
+        prefs.edit().putString("history_json", newArr.toString()).apply()
     }
 }
 
@@ -1511,8 +1625,10 @@ fun AsyncImage(url: String, modifier: Modifier = Modifier) {
             } else if (url.startsWith("http://") || url.startsWith("https://")) {
                 withContext(Dispatchers.IO) {
                     try {
-                        val client = okhttp3.OkHttpClient()
-                        val response = client.newCall(okhttp3.Request.Builder().url(url).build()).execute()
+                        // Reuse the singleton OkHttpClient — avoids spawning new thread pools per image
+                        val response = MediaExtractorClient.httpClient.newCall(
+                            okhttp3.Request.Builder().url(url).build()
+                        ).execute()
                         if (response.isSuccessful) {
                             val bytes = response.body?.bytes()
                             if (bytes != null) {

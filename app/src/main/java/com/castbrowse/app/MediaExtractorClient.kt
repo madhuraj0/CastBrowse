@@ -1,6 +1,8 @@
 package com.castbrowse.app
 
 import android.graphics.Bitmap
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.util.Log
 import android.webkit.JavascriptInterface
@@ -13,10 +15,14 @@ import kotlinx.serialization.json.Json
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.io.File
 import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
 
 @Serializable
 data class ExtractedVideo(
@@ -38,6 +44,7 @@ class MediaExtractorClient(
         private const val TAG = "MediaExtractorClient"
         private val MEDIA_REGEX = Regex("\\.(mp4|webm|m3u8|m3u|mpd|ogg|mkv)(\\?.*)?$", RegexOption.IGNORE_CASE)
 
+        // Fallback static list — used as emergency safety net when adHostsSet is empty
         private val AD_DOMAINS = hashSetOf(
             "doubleclick.net", "googleads.g.doubleclick.net", "pagead2.googlesyndication.com",
             "adservice.google.com", "securepubads.g.doubleclick.net", "pubads.g.doubleclick.net",
@@ -47,19 +54,21 @@ class MediaExtractorClient(
             "propellerads.com", "exoclick.com", "juicyads.com", "adkey.biz"
         )
 
-        private val adHostsSet = HashSet<String>(150000)
+        // Thread-safe set backed by ConcurrentHashMap — safe to read/write from any thread
+        private val adHostsSet: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
         @Volatile private var isLoaded = false
-        private val loadLock = Any()
+
+        // App-lifetime managed scope — no lifecycle leaks; SupervisorJob prevents cascading failure
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        // Singleton OkHttpClient shared across all update calls and thumbnail loading — reuses connection pool & thread pool
+        internal val httpClient by lazy { OkHttpClient() }
 
         fun loadAdHosts(context: Context) {
-            synchronized(loadLock) {
-                if (isLoaded) return
-            }
-            CoroutineScope(Dispatchers.IO).launch {
+            if (isLoaded) return
+            scope.launch {
                 try {
-                    val localSet = HashSet<String>(160000)
-                    localSet.addAll(AD_DOMAINS)
-
                     val localFile = File(context.filesDir, "hosts.txt")
                     val inputStream: InputStream = if (localFile.exists() && localFile.length() > 0) {
                         localFile.inputStream()
@@ -67,26 +76,8 @@ class MediaExtractorClient(
                         context.assets.open("hosts.txt")
                     }
 
-                    inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            val cleanLine = line.trim()
-                            if (cleanLine.startsWith("0.0.0.0 ") || cleanLine.startsWith("127.0.0.1 ")) {
-                                val parts = cleanLine.split(Regex("\\s+"))
-                                if (parts.size >= 2) {
-                                    val domain = parts[1].trim()
-                                    if (domain.isNotEmpty() && !domain.startsWith("#") && domain != "localhost") {
-                                        localSet.add(domain)
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    synchronized(loadLock) {
-                        adHostsSet.clear()
-                        adHostsSet.addAll(localSet)
-                        isLoaded = true
-                    }
+                    parseHostsStream(inputStream)
+                    isLoaded = true
                     Log.d(TAG, "Adblock list loaded successfully: ${adHostsSet.size} domains")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to load adblock hosts", e)
@@ -95,14 +86,21 @@ class MediaExtractorClient(
         }
 
         fun updateAdHosts(context: Context, onResult: (Boolean, Int) -> Unit) {
-            CoroutineScope(Dispatchers.IO).launch {
+            // Connectivity check before attempting network request
+            if (!isNetworkAvailable(context)) {
+                scope.launch {
+                    withContext(Dispatchers.Main) { onResult(false, 0) }
+                }
+                return
+            }
+
+            scope.launch {
                 try {
-                    val client = okhttp3.OkHttpClient()
-                    val request = okhttp3.Request.Builder()
+                    val request = Request.Builder()
                         .url("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
                         .build()
 
-                    client.newCall(request).execute().use { response ->
+                    httpClient.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) {
                             withContext(Dispatchers.Main) { onResult(false, 0) }
                             return@launch
@@ -114,30 +112,14 @@ class MediaExtractorClient(
                             return@launch
                         }
 
+                        // Persist the downloaded file locally
                         val localFile = File(context.filesDir, "hosts.txt")
                         localFile.writeText(bodyString)
 
-                        val localSet = HashSet<String>(160000)
-                        localSet.addAll(AD_DOMAINS)
-
-                        bodyString.lineSequence().forEach { line ->
-                            val cleanLine = line.trim()
-                            if (cleanLine.startsWith("0.0.0.0 ") || cleanLine.startsWith("127.0.0.1 ")) {
-                                val parts = cleanLine.split(Regex("\\s+"))
-                                if (parts.size >= 2) {
-                                    val domain = parts[1].trim()
-                                    if (domain.isNotEmpty() && !domain.startsWith("#") && domain != "localhost") {
-                                        localSet.add(domain)
-                                    }
-                                }
-                            }
-                        }
-
-                        synchronized(loadLock) {
-                            adHostsSet.clear()
-                            adHostsSet.addAll(localSet)
-                            isLoaded = true
-                        }
+                        // Re-parse from the new content
+                        adHostsSet.clear()
+                        parseHostsString(bodyString)
+                        isLoaded = true
 
                         val prefs = context.getSharedPreferences("adblock_prefs", Context.MODE_PRIVATE)
                         prefs.edit().putLong("last_update", System.currentTimeMillis()).apply()
@@ -168,6 +150,35 @@ class MediaExtractorClient(
             }
         }
 
+        private fun parseHostsStream(stream: InputStream) {
+            stream.bufferedReader().useLines { lines ->
+                lines.forEach { line -> parseLine(line) }
+            }
+        }
+
+        private fun parseHostsString(content: String) {
+            content.lineSequence().forEach { line -> parseLine(line) }
+        }
+
+        private fun parseLine(line: String) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("0.0.0.0 ") || trimmed.startsWith("127.0.0.1 ")) {
+                val parts = trimmed.split(Regex("\\s+"))
+                if (parts.size >= 2) {
+                    val domain = parts[1].trim()
+                    if (domain.isNotEmpty() && !domain.startsWith("#") && domain != "localhost") {
+                        adHostsSet.add(domain)
+                    }
+                }
+            }
+        }
+
+        private fun isNetworkAvailable(context: Context): Boolean {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val network = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(network) ?: return false
+            return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        }
 
         private val DOM_SCRAPER_SCRIPT = """
             (function() {
@@ -270,14 +281,21 @@ class MediaExtractorClient(
     }
 
     private fun isAdHost(host: String): Boolean {
-        var current = host
-        while (current.contains(".")) {
-            if (adHostsSet.contains(current)) {
-                return true
+        // Fast path: check the dynamic ConcurrentHashMap set (thread-safe O(1) reads)
+        if (adHostsSet.isNotEmpty()) {
+            var current = host
+            while (current.contains(".")) {
+                if (adHostsSet.contains(current)) return true
+                current = current.substringAfter(".")
             }
-            current = current.substringAfter(".")
+            if (adHostsSet.contains(current)) return true
         }
-        return adHostsSet.contains(current)
+        // Fallback: static emergency list (covers startup window before async load finishes)
+        if (AD_DOMAINS.contains(host)) return true
+        for (adDomain in AD_DOMAINS) {
+            if (host.endsWith(".$adDomain")) return true
+        }
+        return false
     }
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
@@ -289,7 +307,7 @@ class MediaExtractorClient(
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        // Inject DOM Parser script
+        // Inject DOM Parser script — runs in page context, only after page fully loads
         view?.evaluateJavascript(DOM_SCRAPER_SCRIPT, null)
         
         // Inject viewport spoofing if desktop mode is enabled
