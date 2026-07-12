@@ -13,6 +13,7 @@ A lightweight Android web browser with privacy-hardening, tabbed browsing, media
 ## 🔒 Privacy & Security Features
 
 * **Privacy Browser**: Disables persistent cookies, DOM storage, and local file access schemes. Wipes cache and state on close.
+* **Ad Blocking**: Logarithmic O(d) right-to-left blocker powered by [Steven Black's Hosts](https://github.com/StevenBlack/hosts) (auto-updated weekly in the background, or manually in-app).
 * **1-Tap Session Clear**: Instantly clears browser data, resets session state, and terminates the application process.
 * **Anti-Screen Capture**: Enforces `FLAG_SECURE` to block screenshots and recording.
 * **No Backups**: `allowBackup="false"` prevents local database extracts via ADB.
@@ -42,6 +43,14 @@ keytool -genkeypair -v -keystore app/castbrowse-release.jks -keyalg RSA -keysize
 ./gradlew assembleRelease
 ```
 Output: `app/build/outputs/apk/release/app-release.apk`
+
+---
+
+## 💎 Credits & Attributions
+
+* **[FCast Protocol & Receiver](https://fcast.org/)**: Open-source lightweight casting framework.
+* **[Steven Black's Hosts](https://github.com/StevenBlack/hosts)**: Extensible host-based adblocking list.
+* **Google Android Team**: Jetpack Compose, ExoPlayer/Media3, and ML Kit Barcode scanning.
 
 ---
 

@@ -179,6 +179,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         LocalMediaProxy.start()
         
+        // Load Adblock hosts and check for updates asynchronously
+        MediaExtractorClient.loadAdHosts(this)
+        MediaExtractorClient.checkAutoUpdate(this)
+        
         // Security Hardening: Block screenshots and video capture of this app
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
@@ -776,6 +780,37 @@ class MainActivity : ComponentActivity() {
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
+                                // 7. Credits & Privacy
+                                DropdownMenuItem(
+                                    text = { Text("Credits & Privacy") },
+                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                    onClick = {
+                                        showMoreActionsSheet = false
+                                        showCreditsDialog = true
+                                    }
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
+                                // 7.5. Update Adblock List
+                                DropdownMenuItem(
+                                    text = { Text("Update Adblock List") },
+                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                    onClick = {
+                                        showMoreActionsSheet = false
+                                        android.widget.Toast.makeText(context, "Updating adblock list...", android.widget.Toast.LENGTH_SHORT).show()
+                                        MediaExtractorClient.updateAdHosts(context) { success, count ->
+                                            if (success) {
+                                                android.widget.Toast.makeText(context, "Adblock list updated! $count hosts loaded.", android.widget.Toast.LENGTH_LONG).show()
+                                            } else {
+                                                android.widget.Toast.makeText(context, "Failed to update adblock list.", android.widget.Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    }
+                                )
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
                                 // 5. Setup Wizard
                                 DropdownMenuItem(
                                     text = { Text("Setup Wizard") },
@@ -805,18 +840,6 @@ class MainActivity : ComponentActivity() {
                                         showMoreActionsSheet = false
                                         val intent = android.content.Intent(context, CastControlActivity::class.java)
                                         context.startActivity(intent)
-                                    }
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-
-                                // 7. Credits & Privacy
-                                DropdownMenuItem(
-                                    text = { Text("Credits & Privacy") },
-                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        showCreditsDialog = true
                                     }
                                 )
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)

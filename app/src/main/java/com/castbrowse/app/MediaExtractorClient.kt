@@ -10,6 +10,13 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.InputStream
 
 @Serializable
 data class ExtractedVideo(
@@ -39,6 +46,128 @@ class MediaExtractorClient(
             "bidswitch.net", "applovin.com", "adcolony.com", "unityads.com", "popads.net",
             "propellerads.com", "exoclick.com", "juicyads.com", "adkey.biz"
         )
+
+        private val adHostsSet = HashSet<String>(150000)
+        @Volatile private var isLoaded = false
+        private val loadLock = Any()
+
+        fun loadAdHosts(context: Context) {
+            synchronized(loadLock) {
+                if (isLoaded) return
+            }
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val localSet = HashSet<String>(160000)
+                    localSet.addAll(AD_DOMAINS)
+
+                    val localFile = File(context.filesDir, "hosts.txt")
+                    val inputStream: InputStream = if (localFile.exists() && localFile.length() > 0) {
+                        localFile.inputStream()
+                    } else {
+                        context.assets.open("hosts.txt")
+                    }
+
+                    inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            val cleanLine = line.trim()
+                            if (cleanLine.startsWith("0.0.0.0 ") || cleanLine.startsWith("127.0.0.1 ")) {
+                                val parts = cleanLine.split(Regex("\\s+"))
+                                if (parts.size >= 2) {
+                                    val domain = parts[1].trim()
+                                    if (domain.isNotEmpty() && !domain.startsWith("#") && domain != "localhost") {
+                                        localSet.add(domain)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    synchronized(loadLock) {
+                        adHostsSet.clear()
+                        adHostsSet.addAll(localSet)
+                        isLoaded = true
+                    }
+                    Log.d(TAG, "Adblock list loaded successfully: ${adHostsSet.size} domains")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to load adblock hosts", e)
+                }
+            }
+        }
+
+        fun updateAdHosts(context: Context, onResult: (Boolean, Int) -> Unit) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val client = okhttp3.OkHttpClient()
+                    val request = okhttp3.Request.Builder()
+                        .url("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
+                        .build()
+
+                    client.newCall(request).execute().use { response ->
+                        if (!response.isSuccessful) {
+                            withContext(Dispatchers.Main) { onResult(false, 0) }
+                            return@launch
+                        }
+
+                        val bodyString = response.body?.string()
+                        if (bodyString.isNullOrEmpty()) {
+                            withContext(Dispatchers.Main) { onResult(false, 0) }
+                            return@launch
+                        }
+
+                        val localFile = File(context.filesDir, "hosts.txt")
+                        localFile.writeText(bodyString)
+
+                        val localSet = HashSet<String>(160000)
+                        localSet.addAll(AD_DOMAINS)
+
+                        bodyString.lineSequence().forEach { line ->
+                            val cleanLine = line.trim()
+                            if (cleanLine.startsWith("0.0.0.0 ") || cleanLine.startsWith("127.0.0.1 ")) {
+                                val parts = cleanLine.split(Regex("\\s+"))
+                                if (parts.size >= 2) {
+                                    val domain = parts[1].trim()
+                                    if (domain.isNotEmpty() && !domain.startsWith("#") && domain != "localhost") {
+                                        localSet.add(domain)
+                                    }
+                                }
+                            }
+                        }
+
+                        synchronized(loadLock) {
+                            adHostsSet.clear()
+                            adHostsSet.addAll(localSet)
+                            isLoaded = true
+                        }
+
+                        val prefs = context.getSharedPreferences("adblock_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putLong("last_update", System.currentTimeMillis()).apply()
+
+                        Log.d(TAG, "Adblock list updated successfully: ${adHostsSet.size} domains")
+                        withContext(Dispatchers.Main) {
+                            onResult(true, adHostsSet.size)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error updating adblock hosts", e)
+                    withContext(Dispatchers.Main) {
+                        onResult(false, 0)
+                    }
+                }
+            }
+        }
+
+        fun checkAutoUpdate(context: Context) {
+            val prefs = context.getSharedPreferences("adblock_prefs", Context.MODE_PRIVATE)
+            val lastUpdate = prefs.getLong("last_update", 0L)
+            val sevenDaysMs = 7 * 24 * 60 * 60 * 1000L
+            if (System.currentTimeMillis() - lastUpdate > sevenDaysMs) {
+                Log.d(TAG, "Automatic adblock update triggered")
+                updateAdHosts(context) { success, count ->
+                    Log.d(TAG, "Auto update completed. Success: $success, count: $count")
+                }
+            }
+        }
+
 
         private val DOM_SCRAPER_SCRIPT = """
             (function() {
@@ -141,13 +270,14 @@ class MediaExtractorClient(
     }
 
     private fun isAdHost(host: String): Boolean {
-        if (AD_DOMAINS.contains(host)) return true
-        for (adDomain in AD_DOMAINS) {
-            if (host.endsWith(".$adDomain")) {
+        var current = host
+        while (current.contains(".")) {
+            if (adHostsSet.contains(current)) {
                 return true
             }
+            current = current.substringAfter(".")
         }
-        return false
+        return adHostsSet.contains(current)
     }
 
     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
