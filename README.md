@@ -1,5 +1,9 @@
 <p align="center">
   <img src="logo.svg" alt="CastBrowse Logo" width="120" height="120">
+  <br>
+  <a href="https://keepandroidopen.org/">
+    <img src="https://img.shields.io/badge/Keep_Android-Open-green?logo=android&logoColor=white&style=for-the-badge" alt="Keep Android Open" />
+  </a>
 </p>
 
 # CastBrowse
@@ -7,6 +11,12 @@
 A lightweight Android web browser with privacy-hardening, tabbed browsing, media extraction, and casting support for the open-source [FCast protocol](https://fcast.org/).
 
 > ⚠️ **Disclaimer**: The entire code of this project was generated using Antigravity (AI coding assistant) and is a completely **vibecoded** project. Inspect the code before building or installing.
+
+## ✊ Keep Android Open
+
+Android's open ecosystem is under threat. Gatekeeping and forced registrations limit user freedom and developer independence. We support the movement to keep Android an open, accessible, and decentralized platform.
+
+Learn more and join the campaign at [keepandroidopen.org](https://keepandroidopen.org/).
 
 ---
 
