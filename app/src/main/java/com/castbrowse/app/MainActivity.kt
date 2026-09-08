@@ -8,6 +8,7 @@ import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -159,6 +160,78 @@ private val CastIcon: ImageVector by lazy {
     }.build()
 }
 
+// Inline Up Arrow icon for Find in Page
+private val UpArrowIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(7.41f, 15.41f)
+        lineTo(12f, 10.83f)
+        lineTo(16.59f, 15.41f)
+        lineTo(18f, 14f)
+        lineTo(12f, 8f)
+        lineTo(6f, 14f)
+        close()
+    }.build()
+}
+
+// Inline Down Arrow icon for Find in Page
+private val DownArrowIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(7.41f, 8.59f)
+        lineTo(12f, 13.17f)
+        lineTo(16.59f, 8.59f)
+        lineTo(18f, 10f)
+        lineTo(12f, 16f)
+        lineTo(6f, 10f)
+        close()
+    }.build()
+}
+
+// Inline Share icon for Stream Details dialog
+private val ShareIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(18f, 16.08f)
+        curveTo(17.24f, 16.08f, 16.56f, 16.38f, 16.04f, 16.85f)
+        lineTo(8.91f, 12.7f)
+        curveTo(8.96f, 12.47f, 9f, 12.24f, 9f, 12f)
+        curveTo(9f, 11.76f, 8.96f, 11.53f, 8.91f, 11.3f)
+        lineTo(15.96f, 7.19f)
+        curveTo(16.5f, 7.69f, 17.21f, 8f, 18f, 8f)
+        curveTo(19.66f, 8f, 21f, 6.66f, 21f, 5f)
+        curveTo(21f, 3.34f, 19.66f, 2f, 18f, 2f)
+        curveTo(16.34f, 2f, 15f, 3.34f, 15f, 5f)
+        curveTo(15f, 5.24f, 15.04f, 5.47f, 15.09f, 5.7f)
+        lineTo(8.04f, 9.81f)
+        curveTo(7.5f, 9.31f, 6.79f, 9f, 6f, 9f)
+        curveTo(4.34f, 9f, 3f, 10.34f, 3f, 12f)
+        curveTo(3f, 13.66f, 4.34f, 15f, 6f, 15f)
+        curveTo(6.79f, 15f, 7.5f, 14.69f, 8.04f, 14.19f)
+        lineTo(15.16f, 18.35f)
+        curveTo(15.11f, 18.56f, 15.08f, 18.78f, 15.08f, 19f)
+        curveTo(15.08f, 20.61f, 16.39f, 21.92f, 18f, 21.92f)
+        curveTo(19.61f, 21.92f, 20.92f, 20.61f, 20.92f, 19f)
+        curveTo(20.92f, 17.39f, 19.61f, 16.08f, 18f, 16.08f)
+        close()
+    }.build()
+}
+
 class MainActivity : ComponentActivity() {
 
     private var webView: SecureWebView? = null
@@ -167,6 +240,8 @@ class MainActivity : ComponentActivity() {
     // State for Browser Tab Management
     private val tabs = mutableStateListOf(BrowserTab(1, "DuckDuckGo", "https://html.duckduckgo.com"))
     private var activeTabId by mutableStateOf(1)
+    private val tabStates = mutableMapOf<Int, Bundle>()
+    private val tabVideos = mutableMapOf<Int, List<ExtractedVideo>>()
 
     // Extracted video links
     private val extractedVideos = mutableStateListOf<ExtractedVideo>()
@@ -262,6 +337,8 @@ class MainActivity : ComponentActivity() {
             CastPlaybackService.stop(this@MainActivity)
             LocalMediaProxy.stop()
             webView?.wipeAllData()
+            tabStates.clear()
+            tabVideos.clear()
             tabs.clear()
             extractedVideos.clear()
             CastSessionManager.castingDevice = null
@@ -299,6 +376,9 @@ class MainActivity : ComponentActivity() {
             val activeTabIdx = tabs.indexOfFirst { it.id == activeTabId }
             if (activeTabIdx != -1) {
                 tabs[activeTabIdx] = tabs[activeTabIdx].copy(url = formattedUrl)
+                tabStates.remove(activeTabId)
+                tabVideos.remove(activeTabId)
+                extractedVideos.clear()
                 webView?.loadUrl(formattedUrl)
             }
         }
@@ -386,10 +466,6 @@ class MainActivity : ComponentActivity() {
         }
         var addressBarFocused by remember { mutableStateOf(false) }
 
-        val bringIntoViewRequester = remember { BringIntoViewRequester() }
-        val coroutineScope = rememberCoroutineScope()
-        var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
-
         LaunchedEffect(addressBarFocused) {
             if (addressBarFocused) {
                 delay(50)
@@ -413,6 +489,23 @@ class MainActivity : ComponentActivity() {
         var isLoading by remember { mutableStateOf(false) }
         var lastLoadedTabId by remember { mutableStateOf(activeTabId) }
 
+        var showFindInPage by remember { mutableStateOf(false) }
+        var findQuery by remember { mutableStateOf("") }
+        var findMatchIndex by remember { mutableStateOf(0) }
+        var findMatchTotal by remember { mutableStateOf(0) }
+
+        BackHandler(enabled = showFindInPage) {
+            showFindInPage = false
+            findQuery = ""
+            webView?.clearMatches()
+            findMatchIndex = 0
+            findMatchTotal = 0
+        }
+
+        BackHandler(enabled = !showFindInPage && (webView?.canGoBack() == true)) {
+            webView?.goBack()
+        }
+
         Scaffold(
         topBar = {
             Surface(
@@ -435,8 +528,14 @@ class MainActivity : ComponentActivity() {
                             Tab(
                                 selected = isActive,
                                 onClick = {
-                                    activeTabId = tab.id
-                                    extractedVideos.clear()
+                                    if (tab.id != activeTabId) {
+                                        val oldBundle = Bundle()
+                                        webView?.saveState(oldBundle)
+                                        tabStates[activeTabId] = oldBundle
+                                        tabVideos[activeTabId] = extractedVideos.toList()
+
+                                        activeTabId = tab.id
+                                    }
                                 },
                                 modifier = Modifier
                                     .padding(top = 4.dp, bottom = 4.dp, start = 4.dp)
@@ -454,7 +553,7 @@ class MainActivity : ComponentActivity() {
                                     Text(
                                         text = tab.title,
                                         style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                                             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
                                         ),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -464,11 +563,13 @@ class MainActivity : ComponentActivity() {
                                         IconButton(
                                             onClick = {
                                                 val idx = tabs.indexOf(tab)
+                                                val closingId = tab.id
+                                                tabStates.remove(closingId)
+                                                tabVideos.remove(closingId)
                                                 tabs.remove(tab)
-                                                if (isActive) {
+                                                if (isActive && tabs.isNotEmpty()) {
                                                     activeTabId = tabs.getOrNull(idx)?.id ?: tabs.last().id
                                                 }
-                                                extractedVideos.clear()
                                             },
                                             modifier = Modifier.size(16.dp)
                                         ) {
@@ -487,6 +588,11 @@ class MainActivity : ComponentActivity() {
                         // Add tab button (+) at the end
                         IconButton(
                             onClick = {
+                                val oldBundle = Bundle()
+                                webView?.saveState(oldBundle)
+                                tabStates[activeTabId] = oldBundle
+                                tabVideos[activeTabId] = extractedVideos.toList()
+
                                 val nextId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
                                 tabs.add(BrowserTab(nextId, "New Tab", "https://html.duckduckgo.com"))
                                 activeTabId = nextId
@@ -773,6 +879,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
 
+                                // 4a. Find in Page
+                                DropdownMenuItem(
+                                    text = { Text("Find in Page") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                    onClick = {
+                                        showMoreActionsSheet = false
+                                        showFindInPage = true
+                                    }
+                                )
+
                                 // 4b. View History
                                 DropdownMenuItem(
                                     text = { Text("View History") },
@@ -902,6 +1019,109 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+                    }
+
+                    // Find in Page Bar
+                    AnimatedVisibility(
+                        visible = showFindInPage,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            tonalElevation = 2.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Find in page",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                BasicTextField(
+                                    value = findQuery,
+                                    onValueChange = { newQuery ->
+                                        findQuery = newQuery
+                                        if (newQuery.isEmpty()) {
+                                            webView?.clearMatches()
+                                            findMatchIndex = 0
+                                            findMatchTotal = 0
+                                        } else {
+                                            webView?.findAllAsync(newQuery)
+                                        }
+                                    },
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    decorationBox = { innerTextField ->
+                                        if (findQuery.isEmpty()) {
+                                            Text(
+                                                "Find in page...",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                )
+                                if (findQuery.isNotEmpty()) {
+                                    Text(
+                                        text = if (findMatchTotal > 0) "$findMatchIndex/$findMatchTotal" else "0/0",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    )
+                                    IconButton(
+                                        onClick = { webView?.findNext(false) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = UpArrowIcon,
+                                            contentDescription = "Previous match",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { webView?.findNext(true) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = DownArrowIcon,
+                                            contentDescription = "Next match",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = {
+                                        showFindInPage = false
+                                        findQuery = ""
+                                        webView?.clearMatches()
+                                        findMatchIndex = 0
+                                        findMatchTotal = 0
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close Find in page",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1134,6 +1354,11 @@ class MainActivity : ComponentActivity() {
                                 "AndroidApp"
                             )
 
+                            setFindListener { activeMatchOrdinal, numberOfMatches, _ ->
+                                findMatchIndex = if (numberOfMatches > 0) activeMatchOrdinal + 1 else 0
+                                findMatchTotal = numberOfMatches
+                            }
+
                             if (defaultUserAgent == null) {
                                 defaultUserAgent = settings.userAgentString
                             }
@@ -1157,10 +1382,22 @@ class MainActivity : ComponentActivity() {
                         }
 
                         if (lastLoadedTabId != activeTabId) {
+                            val prevBundle = Bundle()
+                            view.saveState(prevBundle)
+                            tabStates[lastLoadedTabId] = prevBundle
+                            tabVideos[lastLoadedTabId] = extractedVideos.toList()
+
                             lastLoadedTabId = activeTabId
                             val currentActiveTab = tabs.firstOrNull { it.id == activeTabId }
                             if (currentActiveTab != null) {
-                                view.loadUrl(currentActiveTab.url)
+                                val savedBundle = tabStates[activeTabId]
+                                if (savedBundle != null) {
+                                    view.restoreState(savedBundle)
+                                } else {
+                                    view.loadUrl(currentActiveTab.url)
+                                }
+                                extractedVideos.clear()
+                                tabVideos[activeTabId]?.let { extractedVideos.addAll(it) }
                             }
                         }
                     },
@@ -1689,6 +1926,71 @@ class MainActivity : ComponentActivity() {
                                     contentDescription = "Copy URL",
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        // Action buttons: Cast, External Player, Share Link
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Button(
+                                onClick = {
+                                    val target = video
+                                    detailedVideoForDialog = null
+                                    selectedVideoToCast = target
+                                    showCastDialog = true
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Cast", maxLines = 1)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val mime = when {
+                                        video.url.contains(".m3u8") -> "application/x-mpegURL"
+                                        video.url.contains(".mpd") -> "application/dash+xml"
+                                        video.url.contains(".mp4") -> "video/mp4"
+                                        video.url.contains(".webm") -> "video/webm"
+                                        video.url.contains(".mkv") -> "video/x-matroska"
+                                        else -> "video/*"
+                                    }
+                                    val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(Uri.parse(video.url), mime)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    try {
+                                        context.startActivity(Intent.createChooser(playIntent, "Play with external player"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "No video player found", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Player", maxLines = 1)
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, video.url)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share Stream URL"))
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = ShareIcon,
+                                    contentDescription = "Share URL",
+                                    tint = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }

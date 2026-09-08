@@ -323,6 +323,29 @@ class MediaExtractorClient(
                 } catch(e) {}
             })();
         """.trimIndent()
+
+        private val COSMETIC_ADBLOCK_CSS = """
+            (function() {
+                if (document.getElementById('__castbrowse_cosmetic_adblock')) return;
+                var style = document.createElement('style');
+                style.id = '__castbrowse_cosmetic_adblock';
+                style.type = 'text/css';
+                style.appendChild(document.createTextNode(`
+                    .ad, .ads, .adsbygoogle, .advertisement, [id^="ad-"], [class*="ad-box"],
+                    [class*="banner-ad"], [class*="ad-container"], [id*="google_ads"],
+                    iframe[src*="doubleclick.net"], iframe[src*="googleads"],
+                    div[class*="sponsored-post"], .taboola-ad, .outbrain-ad {
+                        display: none !important;
+                        visibility: hidden !important;
+                        height: 0 !important;
+                        min-height: 0 !important;
+                        opacity: 0 !important;
+                        pointer-events: none !important;
+                    }
+                `));
+                (document.head || document.documentElement).appendChild(style);
+            })();
+        """.trimIndent()
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
@@ -392,6 +415,11 @@ class MediaExtractorClient(
         super.onPageFinished(view, url)
         // Inject DOM Parser script — runs in page context, only after page fully loads
         view?.evaluateJavascript(DOM_SCRAPER_SCRIPT, null)
+
+        // Cosmetic ad blocking: hide blocked ad containers and empty placeholders
+        if (isAdBlockEnabled()) {
+            view?.evaluateJavascript(COSMETIC_ADBLOCK_CSS, null)
+        }
         
         // Inject viewport spoofing if desktop mode is enabled
         if (isDesktopMode()) {
