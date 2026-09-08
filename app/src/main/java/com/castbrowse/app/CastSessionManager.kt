@@ -10,13 +10,16 @@ object CastSessionManager {
     var isCasting by mutableStateOf(false)
     var isMediaPlaying by mutableStateOf(false)
     var activeMediaUrl by mutableStateOf<String?>(null)
+    var activeMediaTitle by mutableStateOf<String?>(null)
     var customFcastPort by mutableStateOf(FCastClient.FCAST_DEFAULT_PORT)
-    /** Current playback position in seconds, pushed by FCast PlaybackUpdate (opcode 7). */
+    /** Current playback position in seconds, pushed by FCast PlaybackUpdate (opcode 6). */
     var playbackPositionSeconds by mutableStateOf(0.0)
     /** 0=idle, 1=playing, 2=paused, 3=buffering — from FCast PlaybackUpdate (opcode 6). */
     var playbackState by mutableStateOf(0)
     /** Total duration of media in seconds. */
     var mediaDurationSeconds by mutableStateOf(0.0)
+    /** Receiver volume level (0.0 to 1.0) */
+    var volume by mutableStateOf(0.5f)
 
     fun getRecentIps(context: Context): List<String> {
         val prefs = context.getSharedPreferences("cast_prefs", Context.MODE_PRIVATE)

@@ -373,6 +373,7 @@ class CastControlActivity : ComponentActivity() {
                                         CastSessionManager.isMediaPlaying = true
                                         CastSessionManager.playbackState = 1
                                     }
+                                    CastPlaybackService.updateState(this@CastControlActivity)
                                 }
                             },
                             modifier = Modifier.size(80.dp),
@@ -410,7 +411,10 @@ class CastControlActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // 5. Volume Slider
-                    var volumeState by remember { mutableStateOf(50f) }
+                    var volumeState by remember { mutableStateOf(CastSessionManager.volume * 100f) }
+                    LaunchedEffect(CastSessionManager.volume) {
+                        volumeState = CastSessionManager.volume * 100f
+                    }
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -425,6 +429,7 @@ class CastControlActivity : ComponentActivity() {
                                 value = volumeState,
                                 onValueChange = { volumeState = it },
                                 onValueChangeFinished = {
+                                    CastSessionManager.volume = volumeState / 100f
                                     lifecycleScope.launch {
                                         FCastClient.setVolume(
                                             activeDevice.ipAddress,
@@ -453,17 +458,29 @@ class CastControlActivity : ComponentActivity() {
                     // 6. Playback Speed Selector
                     var speedState by remember { mutableStateOf(1.0f) }
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            "Speed",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Playback Speed",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "${speedState}x",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            listOf(0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
+                            listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
@@ -507,9 +524,11 @@ class CastControlActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             lifecycleScope.launch {
+                                CastPlaybackService.stop(this@CastControlActivity)
                                 FCastClient.stop(activeDevice.ipAddress, CastSessionManager.customFcastPort)
                                 CastSessionManager.isMediaPlaying = false
                                 CastSessionManager.activeMediaUrl = null
+                                CastSessionManager.activeMediaTitle = null
                                 Toast.makeText(this@CastControlActivity, "Playback stopped", Toast.LENGTH_SHORT).show()
                                 finish()
                             }

@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
@@ -248,19 +250,24 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        LocalMediaProxy.stop()
+        if (!CastSessionManager.isMediaPlaying && !CastSessionManager.isCasting) {
+            LocalMediaProxy.stop()
+        }
         super.onDestroy()
     }
 
     private fun triggerPanicWipe() {
         lifecycleScope.launch {
             Toast.makeText(this@MainActivity, "Wiping all session data...", Toast.LENGTH_SHORT).show()
+            CastPlaybackService.stop(this@MainActivity)
+            LocalMediaProxy.stop()
             webView?.wipeAllData()
             tabs.clear()
             extractedVideos.clear()
             CastSessionManager.castingDevice = null
             CastSessionManager.isMediaPlaying = false
             CastSessionManager.activeMediaUrl = null
+            CastSessionManager.activeMediaTitle = null
             delay(800)
             finishAffinity()
             System.exit(0)
@@ -278,10 +285,10 @@ class MainActivity : ComponentActivity() {
         }
 
         if (isDirectVideoLink(formattedUrl)) {
-            val filename = formattedUrl.substringBefore("?").substringAfterLast("/")
+            val filename = MediaExtractorClient.extractFilenameFromUrl(formattedUrl)
             val video = ExtractedVideo(
                 url = formattedUrl,
-                title = if (filename.isNotEmpty()) filename else "Direct Stream"
+                title = filename
             )
             selectedVideoToCast = video
             if (extractedVideos.none { it.url == formattedUrl }) {
@@ -325,18 +332,21 @@ class MainActivity : ComponentActivity() {
                 headers["Cookie"] = cookies
             }
 
-            val proxiedUrl = LocalMediaProxy.getProxyUrl(videoUrl)
+            val proxiedUrl = LocalMediaProxy.getProxyUrl(videoUrl, headers)
             android.util.Log.d("MainActivity", "Proxying URL: $videoUrl -> $proxiedUrl")
+            val cleanTitle = videoTitle.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(videoUrl) }
             val result = FCastClient.play(
                 ipAddress = device.ipAddress,
                 url = proxiedUrl,
-                title = videoTitle,
+                title = cleanTitle,
                 port = customFCastPort,
                 headers = headers
             ) {
                 lifecycleScope.launch {
+                    CastPlaybackService.stop(this@MainActivity)
                     CastSessionManager.isMediaPlaying = false
                     CastSessionManager.activeMediaUrl = null
+                    CastSessionManager.activeMediaTitle = null
                 }
             }
 
@@ -344,6 +354,19 @@ class MainActivity : ComponentActivity() {
             result.onSuccess {
                 CastSessionManager.isMediaPlaying = true
                 CastSessionManager.activeMediaUrl = videoUrl
+                CastSessionManager.activeMediaTitle = cleanTitle
+                CastSessionManager.castingDevice = device
+
+                // Keep screen-lock background casting alive via Foreground Service + WakeLock
+                CastPlaybackService.start(
+                    context = this@MainActivity,
+                    title = cleanTitle,
+                    deviceName = device.name,
+                    ip = device.ipAddress,
+                    port = customFCastPort,
+                    url = proxiedUrl
+                )
+
                 Toast.makeText(this@MainActivity, "Playing on ${device.name}!", Toast.LENGTH_LONG).show()
                 showCastDialog = false
             }.onFailure { e ->
@@ -1085,8 +1108,8 @@ class MainActivity : ComponentActivity() {
                                     if (extra != null) {
                                         lifecycleScope.launch {
                                             if (extractedVideos.none { it.url == extra }) {
-                                                val filename = extra.substringBefore("?").substringAfterLast("/")
-                                                val video = ExtractedVideo(url = extra, title = "Link: $filename")
+                                                val filename = MediaExtractorClient.extractFilenameFromUrl(extra)
+                                                val video = ExtractedVideo(url = extra, title = filename)
                                                 extractedVideos.add(video)
                                                 Toast.makeText(ctx, "Extracted: $filename", Toast.LENGTH_SHORT).show()
                                             }
@@ -1100,8 +1123,10 @@ class MainActivity : ComponentActivity() {
                                 MediaExtractorClient.WebAppInterface { list ->
                                     lifecycleScope.launch {
                                         list.forEach { video ->
-                                            if (extractedVideos.none { it.url == video.url }) {
-                                                extractedVideos.add(video)
+                                            val cleanTitle = MediaExtractorClient.extractFilenameFromUrl(video.url)
+                                            val normalized = video.copy(title = cleanTitle)
+                                            if (extractedVideos.none { it.url == normalized.url }) {
+                                                extractedVideos.add(normalized)
                                             }
                                         }
                                     }
@@ -1335,17 +1360,21 @@ class MainActivity : ComponentActivity() {
 
         // Redesigned Cast Streams Selection Dialog
         if (showCastDialog) {
-            Dialog(onDismissRequest = { showCastDialog = false }) {
+            Dialog(
+                onDismissRequest = { showCastDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                         .wrapContentHeight()
                 ) {
                     Column(
-                        modifier = Modifier.padding(24.dp),
+                        modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
@@ -1365,19 +1394,20 @@ class MainActivity : ComponentActivity() {
                             }
                         } else {
                             LazyColumn(
-                                modifier = Modifier.heightIn(max = 220.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.heightIn(max = 340.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 items(extractedVideos) { video ->
                                     val isSelected = selectedVideoToCast?.url == video.url
+                                    val cleanTitle = video.title.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(video.url) }
                                     OutlinedCard(
                                         shape = RoundedCornerShape(16.dp),
                                         colors = CardDefaults.outlinedCardColors(
                                             containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f) else Color.Transparent
                                         ),
                                         border = BorderStroke(
-                                            width = 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                            width = if (isSelected) 2.dp else 1.dp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
                                         ),
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -1389,32 +1419,80 @@ class MainActivity : ComponentActivity() {
                                                 .padding(12.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            AsyncImage(
-                                                url = video.poster,
-                                                modifier = Modifier
-                                                    .size(width = 72.dp, height = 48.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .clickable {
-                                                        detailedVideoForDialog = video
-                                                    }
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
+                                            if (video.poster.isNotEmpty()) {
+                                                AsyncImage(
+                                                    url = video.poster,
+                                                    modifier = Modifier
+                                                        .size(width = 64.dp, height = 44.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clickable {
+                                                            detailedVideoForDialog = video
+                                                        }
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.PlayArrow,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                            }
                                             Column(modifier = Modifier.weight(1f)) {
+                                                // 1. Only filename as title
                                                 Text(
-                                                    text = video.title,
+                                                    text = cleanTitle,
                                                     fontWeight = FontWeight.Bold,
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
-                                                Text(
-                                                    text = video.url,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
+                                                
+                                                // 2. Full link as subtitle/desc in a horizontally scrollable container
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .horizontalScroll(rememberScrollState())
+                                                ) {
+                                                    Text(
+                                                        text = video.url,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        softWrap = false
+                                                    )
+                                                }
+
+                                                if (video.resolution.isNotEmpty() || video.size.isNotEmpty()) {
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                        if (video.resolution.isNotEmpty()) {
+                                                            Text(
+                                                                text = video.resolution,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.secondary,
+                                                                fontWeight = FontWeight.SemiBold
+                                                            )
+                                                        }
+                                                        if (video.size.isNotEmpty()) {
+                                                            Text(
+                                                                text = video.size,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             RadioButton(
                                                 selected = isSelected,
                                                 onClick = { selectedVideoToCast = video }
@@ -1425,7 +1503,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(20.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
                         // Target Device Card
                         val activeDevice = CastSessionManager.castingDevice
@@ -1475,29 +1553,54 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         } else {
+                            val recentIps = remember { CastSessionManager.getRecentIps(context) }
                             OutlinedCard(
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(16.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("No receiver connected", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                                        Text("Pair a target in wizard", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    Button(
-                                        onClick = {
-                                            showCastDialog = false
-                                            val intent = android.content.Intent(context, CastWizardActivity::class.java)
-                                            context.startActivity(intent)
-                                        },
-                                        shape = RoundedCornerShape(12.dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("Setup Wizard")
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("No receiver connected", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                            Text("Pair in wizard or pick recent", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                showCastDialog = false
+                                                val intent = android.content.Intent(context, CastWizardActivity::class.java)
+                                                context.startActivity(intent)
+                                            },
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text("Wizard")
+                                        }
+                                    }
+                                    if (recentIps.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text("Recent:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            recentIps.forEach { ip ->
+                                                SuggestionChip(
+                                                    onClick = {
+                                                        CastSessionManager.castingDevice = CastDevice("FCast Receiver", ip, CastSessionManager.customFcastPort)
+                                                    },
+                                                    label = { Text(ip) }
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }

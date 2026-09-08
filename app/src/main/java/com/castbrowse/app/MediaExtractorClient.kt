@@ -180,77 +180,160 @@ class MediaExtractorClient(
             return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         }
 
+        fun extractFilenameFromUrl(url: String): String {
+            return try {
+                val clean = url.substringBefore("#").substringBefore("?")
+                val lastPart = clean.substringAfterLast("/")
+                val decoded = java.net.URLDecoder.decode(lastPart, "UTF-8")
+                if (decoded.isNotBlank()) decoded else "video_stream"
+            } catch (e: Exception) {
+                url.substringBefore("?").substringAfterLast("/").ifEmpty { "video_stream" }
+            }
+        }
+
         private val DOM_SCRAPER_SCRIPT = """
             (function() {
-                var videos = [];
-                var videoTags = document.getElementsByTagName('video');
-                for (var i = 0; i < videoTags.length; i++) {
-                    var src = videoTags[i].src;
-                    var title = videoTags[i].title || document.title || "Embedded Video";
-                    
-                    var w = videoTags[i].videoWidth || 0;
-                    var h = videoTags[i].videoHeight || 0;
-                    var resolution = (w > 0 && h > 0) ? w + "x" + h : "";
-                    
-                    var dur = videoTags[i].duration;
-                    var sizeText = (dur && !isNaN(dur)) ? Math.floor(dur / 60) + "m " + Math.floor(dur % 60) + "s" : "";
-                    
-                    var poster = videoTags[i].poster || "";
-                    if (!poster) {
-                        try {
-                            var canvas = document.createElement('canvas');
-                            canvas.width = 160;
-                            canvas.height = 90;
-                            var ctx = canvas.getContext('2d');
-                            ctx.drawImage(videoTags[i], 0, 0, canvas.width, canvas.height);
-                            poster = canvas.toDataURL('image/jpeg', 0.5);
-                        } catch (e) {
-                            poster = "";
-                        }
-                    }
-                    
-                    if (src) {
-                        videos.push({url: src, poster: poster, title: title, resolution: resolution, size: sizeText});
-                    }
-                    
-                    var sourceTags = videoTags[i].getElementsByTagName('source');
-                    for (var j = 0; j < sourceTags.length; j++) {
-                        var ssrc = sourceTags[j].src;
-                        if (ssrc) {
-                            videos.push({url: ssrc, poster: poster, title: title, resolution: resolution, size: sizeText});
-                        }
+                if (window.__castbrowseScraperInitialized) {
+                    if (window.__castbrowseScan) window.__castbrowseScan();
+                    return;
+                }
+                window.__castbrowseScraperInitialized = true;
+
+                function getFilename(u) {
+                    try {
+                        var clean = u.split('?')[0].split('#')[0];
+                        var name = clean.substring(clean.lastIndexOf('/') + 1);
+                        var decoded = decodeURIComponent(name);
+                        return (decoded && decoded.trim().length > 0) ? decoded : "video_stream";
+                    } catch(e) {
+                        return "video_stream";
                     }
                 }
-                
-                var aTags = document.getElementsByTagName('a');
+
+                var reportedUrls = new Set();
                 var videoRegex = /\.(mp4|m3u8|m3u|webm|mpd|ogg|mkv)(\?.*)?$/i;
-                for (var i = 0; i < aTags.length; i++) {
-                    var href = aTags[i].href;
-                    if (href && videoRegex.test(href)) {
-                        var label = aTags[i].innerText.trim() || href.substring(href.lastIndexOf('/') + 1);
-                        videos.push({url: href, poster: "", title: label, resolution: "", size: ""});
+
+                function reportVideo(src, poster, title, resolution, sizeText) {
+                    if (!src || (!src.startsWith('http://') && !src.startsWith('https://'))) return;
+                    if (reportedUrls.has(src)) return;
+                    reportedUrls.add(src);
+                    var cleanTitle = getFilename(src);
+                    var payload = [{
+                        url: src,
+                        poster: poster || "",
+                        title: cleanTitle,
+                        resolution: resolution || "",
+                        size: sizeText || ""
+                    }];
+                    if (window.AndroidApp && window.AndroidApp.postMessage) {
+                        window.AndroidApp.postMessage(JSON.stringify(payload));
                     }
                 }
-                
-                var unique = [];
-                var urls = new Set();
-                for (var k = 0; k < videos.length; k++) {
-                    var v = videos[k];
-                    if (v.url && (v.url.startsWith('http://') || v.url.startsWith('https://')) && !urls.has(v.url)) {
-                        urls.add(v.url);
-                        unique.push(v);
+
+                function checkVideoElement(v) {
+                    if (!v) return;
+                    var src = v.src || v.currentSrc;
+                    var w = v.videoWidth || 0;
+                    var h = v.videoHeight || 0;
+                    var resolution = (w > 0 && h > 0) ? w + "x" + h : "";
+                    var dur = v.duration;
+                    var sizeText = (dur && !isNaN(dur)) ? Math.floor(dur / 60) + "m " + Math.floor(dur % 60) + "s" : "";
+                    var poster = v.poster || "";
+
+                    if (src) {
+                        reportVideo(src, poster, "", resolution, sizeText);
+                    }
+                    var sources = v.getElementsByTagName('source');
+                    for (var j = 0; j < sources.length; j++) {
+                        if (sources[j].src) {
+                            reportVideo(sources[j].src, poster, "", resolution, sizeText);
+                        }
                     }
                 }
-                
-                if (unique.length > 0) {
-                    window.AndroidApp.postMessage(JSON.stringify(unique));
+
+                function scanDocument() {
+                    var videoTags = document.getElementsByTagName('video');
+                    for (var i = 0; i < videoTags.length; i++) {
+                        checkVideoElement(videoTags[i]);
+                    }
+
+                    var aTags = document.getElementsByTagName('a');
+                    for (var k = 0; k < aTags.length; k++) {
+                        var href = aTags[k].href;
+                        if (href && videoRegex.test(href)) {
+                            reportVideo(href, "", "", "", "");
+                        }
+                    }
+
+                    var iframes = document.getElementsByTagName('iframe');
+                    for (var m = 0; m < iframes.length; m++) {
+                        var isrc = iframes[m].src;
+                        if (isrc && videoRegex.test(isrc)) {
+                            reportVideo(isrc, "", "", "", "");
+                        }
+                    }
                 }
+
+                window.__castbrowseScan = scanDocument;
+                scanDocument();
+
+                // Hook HTMLMediaElement.prototype.play and src setter to catch dynamically attached players
+                try {
+                    var origPlay = HTMLMediaElement.prototype.play;
+                    HTMLMediaElement.prototype.play = function() {
+                        checkVideoElement(this);
+                        return origPlay.apply(this, arguments);
+                    };
+
+                    var srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+                    if (srcDesc && srcDesc.set) {
+                        var origSet = srcDesc.set;
+                        srcDesc.set = function(val) {
+                            origSet.call(this, val);
+                            checkVideoElement(this);
+                        };
+                        Object.defineProperty(HTMLMediaElement.prototype, 'src', srcDesc);
+                    }
+                } catch(e) {}
+
+                // Listen to playback and media events
+                document.addEventListener('play', function(e) { checkVideoElement(e.target); }, true);
+                document.addEventListener('loadeddata', function(e) { checkVideoElement(e.target); }, true);
+                document.addEventListener('canplay', function(e) { checkVideoElement(e.target); }, true);
+
+                // MutationObserver for dynamically added videos or iframes
+                try {
+                    var observer = new MutationObserver(function(mutations) {
+                        for (var i = 0; i < mutations.length; i++) {
+                            var mut = mutations[i];
+                            for (var j = 0; j < mut.addedNodes.length; j++) {
+                                var node = mut.addedNodes[j];
+                                if (node && node.nodeType === 1) {
+                                    if (node.tagName === 'VIDEO') {
+                                        checkVideoElement(node);
+                                    } else if (node.getElementsByTagName) {
+                                        var vids = node.getElementsByTagName('video');
+                                        for (var v = 0; v < vids.length; v++) checkVideoElement(vids[v]);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    observer.observe(document.documentElement || document.body, { childList: true, subtree: true });
+                } catch(e) {}
             })();
         """.trimIndent()
     }
 
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val url = request?.url?.toString() ?: return false
+
+        // Block external schemes (intent://, market://, tel:, etc.) from rogue ad redirects
+        val scheme = request.url?.scheme?.lowercase()
+        if (scheme != null && scheme != "http" && scheme != "https" && scheme != "about" && scheme != "data" && scheme != "javascript") {
+            Log.d(TAG, "Blocked external scheme navigation: $url")
+            return true
+        }
         
         // Hardening: Reject cleartext HTTP navigation for public (non-local) sites, force upgrade to HTTPS
         if (url.startsWith("http://") && !isLocalUrl(url)) {
@@ -273,7 +356,7 @@ class MediaExtractorClient(
                 }
             }
             if (isMediaUrl(url)) {
-                val filename = url.substringBefore("?").substringAfterLast("/")
+                val filename = extractFilenameFromUrl(url)
                 onMediaDiscovered(ExtractedVideo(url = url, title = filename))
             }
         }

@@ -11,14 +11,21 @@ import java.net.HttpURLConnection
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 
 object LocalMediaProxy {
     private const val TAG = "LocalMediaProxy"
-    const val PROXY_PORT = 8085
+    const val DEFAULT_PROXY_PORT = 8085
+
+    @Volatile
+    var proxyPort: Int = DEFAULT_PROXY_PORT
+        private set
+
     private var serverSocket: ServerSocket? = null
     private var job: Job? = null
     
@@ -26,12 +33,36 @@ object LocalMediaProxy {
     @Volatile
     private var lastProxyBaseUrl: String? = null
 
+    // URL to custom headers map for passing Referer, Cookie, and User-Agent upstream
+    private val urlHeadersMap = ConcurrentHashMap<String, Map<String, String>>()
+
+    fun registerUrlHeaders(targetUrl: String, headers: Map<String, String>) {
+        urlHeadersMap[targetUrl] = headers
+        try {
+            val uri = URI(targetUrl)
+            val path = uri.path ?: ""
+            val lastSlash = path.lastIndexOf('/')
+            if (lastSlash != -1) {
+                val base = targetUrl.substringBefore(path) + path.substring(0, lastSlash + 1)
+                urlHeadersMap[base] = headers
+            }
+        } catch (e: Exception) {
+            // Ignore URI parsing issues
+        }
+    }
+
     fun start() {
         if (serverSocket != null) return
         job = CoroutineScope(Dispatchers.IO).launch {
             try {
-                serverSocket = ServerSocket(PROXY_PORT)
-                Log.d(TAG, "Proxy server started on port $PROXY_PORT")
+                serverSocket = try {
+                    ServerSocket(DEFAULT_PROXY_PORT)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Default port $DEFAULT_PROXY_PORT busy, binding ephemeral port: ${e.message}")
+                    ServerSocket(0)
+                }
+                proxyPort = serverSocket?.localPort ?: DEFAULT_PROXY_PORT
+                Log.d(TAG, "Proxy server started on port $proxyPort")
                 while (true) {
                     val socket = serverSocket?.accept() ?: break
                     try {
@@ -54,6 +85,8 @@ object LocalMediaProxy {
         serverSocket = null
         job?.cancel()
         job = null
+        urlHeadersMap.clear()
+        lastProxyBaseUrl = null
     }
 
     private fun getLocalIpAddress(): String? {
@@ -88,10 +121,13 @@ object LocalMediaProxy {
         return null
     }
 
-    fun getProxyUrl(targetUrl: String): String {
+    fun getProxyUrl(targetUrl: String, headers: Map<String, String>? = null): String {
+        if (headers != null && headers.isNotEmpty()) {
+            registerUrlHeaders(targetUrl, headers)
+        }
         val ip = getLocalIpAddress() ?: "127.0.0.1"
         val encodedUrl = URLEncoder.encode(targetUrl, "UTF-8")
-        return "http://$ip:$PROXY_PORT/proxy?url=$encodedUrl"
+        return "http://$ip:$proxyPort/proxy?url=$encodedUrl"
     }
 
     private fun handleConnection(socket: Socket) {
@@ -127,19 +163,29 @@ object LocalMediaProxy {
                 
                 // Extract and store the base URL of this target
                 try {
-                    val lastSlash = decoded.lastIndexOf('/')
+                    val uri = URI(decoded)
+                    val p = uri.path ?: ""
+                    val lastSlash = p.lastIndexOf('/')
                     if (lastSlash != -1) {
-                        lastProxyBaseUrl = decoded.substring(0, lastSlash + 1)
+                        lastProxyBaseUrl = decoded.substringBefore(p) + p.substring(0, lastSlash + 1)
                         Log.d(TAG, "Updated lastProxyBaseUrl: $lastProxyBaseUrl")
                     }
                 } catch (e: Exception) {}
                 decoded
             } else {
-                // Resolve relative path using stored base URL
+                // Resolve relative path using stored base URL RFC 3986
                 val base = lastProxyBaseUrl
                 if (base != null) {
-                    val relPath = if (path.startsWith("/")) path.substring(1) else path
-                    base + relPath
+                    try {
+                        URI(base).resolve(path).toString()
+                    } catch (e: Exception) {
+                        if (path.startsWith("/")) {
+                            val uri = URI(base)
+                            "${uri.scheme}://${uri.authority}$path"
+                        } else {
+                            base + path
+                        }
+                    }
                 } else {
                     val out = socket.getOutputStream()
                     out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".toByteArray())
@@ -159,6 +205,16 @@ object LocalMediaProxy {
                 conn.connectTimeout = 10000
                 conn.readTimeout = 15000
                 conn.instanceFollowRedirects = false
+
+                // Attach registered custom headers (Referer, Cookie, User-Agent) to bypass 403 anti-hotlinking
+                val registeredHeaders = urlHeadersMap[targetUrl] ?: lastProxyBaseUrl?.let { urlHeadersMap[it] }
+                if (registeredHeaders != null) {
+                    for ((key, value) in registeredHeaders) {
+                        val lower = key.lowercase()
+                        if (lower == "host" || lower == "connection" || lower == "range") continue
+                        conn.setRequestProperty(key, value)
+                    }
+                }
                 
                 // Forward client headers, excluding Host/Connection/Range
                 for ((key, value) in clientHeaders) {
@@ -173,7 +229,7 @@ object LocalMediaProxy {
                     conn.setRequestProperty("Range", rangeEntry.value)
                 }
                 
-                // Fallback default User-Agent if client didn't supply one
+                // Fallback default User-Agent if client and registered headers didn't supply one
                 if (conn.getRequestProperty("User-Agent") == null) {
                     conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                 }

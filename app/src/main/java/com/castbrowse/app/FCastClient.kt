@@ -59,7 +59,7 @@ object FCastClient {
             val initialJson = buildJsonObject {
                 put("displayName", "CastBrowse Android")
                 put("appName", "CastBrowse")
-                put("appVersion", "1.0.0")
+                put("appVersion", "1.1.0")
             }.toString()
             writeCommandPacket(outputStream, 14, initialJson)
             Log.d(TAG, "Sent Initial handshake")
@@ -130,6 +130,7 @@ object FCastClient {
                                 val json = org.json.JSONObject(bodyStr)
                                 val volume = json.optDouble("volume", -1.0)
                                 if (volume >= 0.0) {
+                                    CastSessionManager.volume = volume.toFloat()
                                     Log.d(TAG, "FCast: VolumeUpdate volume=$volume")
                                 }
                             } catch (e: Exception) {
@@ -170,18 +171,6 @@ object FCastClient {
             CastSessionManager.isMediaPlaying = true
             CastSessionManager.playbackState = 1
             CastSessionManager.playbackPositionSeconds = 0.0
-
-            // Poll receiver for live position/state every 3s (opcode 8 = RequestPlaybackStatus)
-            CoroutineScope(Dispatchers.IO).launch {
-                while (activeSocket?.isConnected == true && activeSocket?.isClosed == false) {
-                    delay(3000)
-                    try {
-                        activeOutputStream?.let { writeCommandPacket(it, 8) }
-                    } catch (e: Exception) {
-                        break
-                    }
-                }
-            }
 
             Unit
         }.onFailure { e ->
@@ -303,7 +292,7 @@ object FCastClient {
                 val initialJson = buildJsonObject {
                     put("displayName", "CastBrowse Android")
                     put("appName", "CastBrowse")
-                    put("appVersion", "1.0.0")
+                    put("appVersion", "1.1.0")
                 }.toString()
                 writeCommandPacket(out, 14, initialJson)
                 
