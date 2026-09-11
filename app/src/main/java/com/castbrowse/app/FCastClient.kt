@@ -59,7 +59,7 @@ object FCastClient {
             val initialJson = buildJsonObject {
                 put("displayName", "CastBrowse Android")
                 put("appName", "CastBrowse")
-                put("appVersion", "1.1.0")
+                put("appVersion", "1.3.1")
             }.toString()
             writeCommandPacket(outputStream, 14, initialJson)
             Log.d(TAG, "Sent Initial handshake")
@@ -292,7 +292,7 @@ object FCastClient {
                 val initialJson = buildJsonObject {
                     put("displayName", "CastBrowse Android")
                     put("appName", "CastBrowse")
-                    put("appVersion", "1.1.0")
+                    put("appVersion", "1.3.1")
                 }.toString()
                 writeCommandPacket(out, 14, initialJson)
                 

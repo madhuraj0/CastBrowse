@@ -1549,7 +1549,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             ) { video ->
                                 lifecycleScope.launch {
-                                    if (extractedVideos.none { it.url == video.url }) {
+                                    if (!MediaExtractorClient.isSegmentUrl(video.url) && extractedVideos.none { it.url == video.url }) {
                                         extractedVideos.add(video)
                                     }
                                 }
@@ -1560,6 +1560,9 @@ class MainActivity : ComponentActivity() {
                                     super.onProgressChanged(view, newProgress)
                                     loadingProgress = newProgress / 100f
                                     isLoading = newProgress < 100
+                                    if (newProgress in 20..30) {
+                                        view?.evaluateJavascript(MediaExtractorClient.DOM_SCRAPER_SCRIPT, null)
+                                    }
                                 }
 
                                 override fun onCreateWindow(
@@ -1594,7 +1597,7 @@ class MainActivity : ComponentActivity() {
                                 val hr = hitTestResult
                                 val extra = hr.extra
                                 if (hr.type == WebView.HitTestResult.SRC_ANCHOR_TYPE || hr.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                                    if (extra != null) {
+                                    if (extra != null && !MediaExtractorClient.isSegmentUrl(extra)) {
                                         lifecycleScope.launch {
                                             if (extractedVideos.none { it.url == extra }) {
                                                 val filename = MediaExtractorClient.extractFilenameFromUrl(extra)
@@ -1612,10 +1615,12 @@ class MainActivity : ComponentActivity() {
                                 MediaExtractorClient.WebAppInterface { list ->
                                     lifecycleScope.launch {
                                         list.forEach { video ->
-                                            val cleanTitle = MediaExtractorClient.extractFilenameFromUrl(video.url)
-                                            val normalized = video.copy(title = cleanTitle)
-                                            if (extractedVideos.none { it.url == normalized.url }) {
-                                                extractedVideos.add(normalized)
+                                            if (!MediaExtractorClient.isSegmentUrl(video.url)) {
+                                                val cleanTitle = MediaExtractorClient.extractFilenameFromUrl(video.url)
+                                                val normalized = video.copy(title = cleanTitle)
+                                                if (extractedVideos.none { it.url == normalized.url }) {
+                                                    extractedVideos.add(normalized)
+                                                }
                                             }
                                         }
                                     }

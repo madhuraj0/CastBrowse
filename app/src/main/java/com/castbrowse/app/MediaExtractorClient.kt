@@ -43,7 +43,12 @@ class MediaExtractorClient(
     companion object {
         private const val TAG = "MediaExtractorClient"
         private val MEDIA_REGEX = Regex("\\.(mp4|webm|m3u8|m3u|mpd|ogg|mkv)(\\?.*)?$", RegexOption.IGNORE_CASE)
-        private val DYNAMIC_STREAM_REGEX = Regex("(?i)(\\.m3u8|\\.mp4|\\.webm|\\.mpd|\\.m4s|\\.ts|/playlist|/manifest|/master|/chunklist)")
+        private val DYNAMIC_STREAM_REGEX = Regex("(?i)(\\.m3u8|\\.mp4|\\.webm|\\.mpd|/playlist|/manifest|/master|/chunklist)")
+        private val SEGMENT_REGEX = Regex("(?i)(\\.m4s|\\.ts|init\\.mp4|init\\.m4s|/seg-\\d+|/chunk-\\d+|/fragment-\\d+|/segment/|/fragment/|/chunk/|/seg_|/chunk_|/fragment_)")
+
+        fun isSegmentUrl(url: String): Boolean {
+            return SEGMENT_REGEX.containsMatchIn(url)
+        }
 
         // Fallback static list — used as emergency safety net when adHostsSet is empty
         private val AD_DOMAINS = hashSetOf(
@@ -196,7 +201,7 @@ class MediaExtractorClient(
             }
         }
 
-        private val DOM_SCRAPER_SCRIPT = """
+        internal val DOM_SCRAPER_SCRIPT = """
             (function() {
                 if (window.__castbrowseScraperInitialized) {
                     if (window.__castbrowseScan) window.__castbrowseScan();
@@ -216,10 +221,13 @@ class MediaExtractorClient(
                 }
 
                 var reportedUrls = new Set();
+                var segmentRegex = /(\.m4s|\.ts|init\.mp4|init\.m4s|\/segment|\/fragment|\/chunk|\/seg-|\/chunk-)([\?#].*)?$/i;
+                var manifestRegex = /(\.m3u8|\.mpd|\/playlist|\/manifest|\/master|\/chunklist)([\?#].*)?$/i;
                 var videoRegex = /\.(mp4|m3u8|m3u|webm|mpd|ogg|mkv)(\?.*)?$/i;
 
                 function reportVideo(src, poster, title, resolution, sizeText) {
                     if (!src || (!src.startsWith('http://') && !src.startsWith('https://'))) return;
+                    if (segmentRegex.test(src)) return; // Ignore segmented chunks (.m4s, .ts)
                     if (reportedUrls.has(src)) return;
                     reportedUrls.add(src);
                     var cleanTitle = getFilename(src);
@@ -235,6 +243,33 @@ class MediaExtractorClient(
                     }
                 }
 
+                // Intercept fetch() calls to capture root manifests (.m3u8, .mpd) from MSE/DASH players
+                try {
+                    var origFetch = window.fetch;
+                    if (origFetch) {
+                        window.fetch = function(input, init) {
+                            var u = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                            if (u && (manifestRegex.test(u) || videoRegex.test(u)) && !segmentRegex.test(u)) {
+                                reportVideo(u, "", "", "", "");
+                            }
+                            return origFetch.apply(this, arguments);
+                        };
+                    }
+                } catch(e) {}
+
+                // Intercept XMLHttpRequest.open() to capture root manifests from AJAX players
+                try {
+                    var origOpen = XMLHttpRequest.prototype.open;
+                    XMLHttpRequest.prototype.open = function(method, url) {
+                        if (url && typeof url === 'string') {
+                            if ((manifestRegex.test(url) || videoRegex.test(url)) && !segmentRegex.test(url)) {
+                                reportVideo(url, "", "", "", "");
+                            }
+                        }
+                        return origOpen.apply(this, arguments);
+                    };
+                } catch(e) {}
+
                 // Dynamic playback interception: Hook HTMLMediaElement prototype
                 try {
                     var origSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
@@ -242,7 +277,7 @@ class MediaExtractorClient(
                         var origSet = origSrcDesc.set;
                         Object.defineProperty(HTMLMediaElement.prototype, 'src', {
                             set: function(val) {
-                                if (val && typeof val === 'string') {
+                                if (val && typeof val === 'string' && !segmentRegex.test(val)) {
                                     reportVideo(val, this.poster || "", "", "", "");
                                 }
                                 return origSet.call(this, val);
@@ -469,6 +504,9 @@ class MediaExtractorClient(
     }
 
     private fun isMediaUrl(url: String, headers: Map<String, String>? = null): Boolean {
+        if (isSegmentUrl(url)) {
+            return false
+        }
         val path = try { Uri.parse(url).path ?: "" } catch (e: Exception) { "" }
         if (MEDIA_REGEX.containsMatchIn(path) || DYNAMIC_STREAM_REGEX.containsMatchIn(url)) {
             return true
