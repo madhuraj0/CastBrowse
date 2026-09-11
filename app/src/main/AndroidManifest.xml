@@ -62,6 +62,12 @@
             android:configChanges="orientation|screenSize"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
+        <activity
+            android:name=".DownloadsActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
         <service
             android:name=".CastPlaybackService"
             android:exported="false"

@@ -139,7 +139,32 @@ object DownloadHelper {
             }
             context.startActivity(intent)
         } catch (e: Exception) {
-            Toast.makeText(context, "Cannot open file directly. Check Downloads folder.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Cannot open file", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun shareDownloadedFile(context: Context, item: DownloadItem) {
+        try {
+            val uriStr = item.localUri ?: return
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "video/*"
+                putExtra(Intent.EXTRA_STREAM, Uri.parse(uriStr))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(Intent.createChooser(intent, "Share"))
+        } catch (e: Exception) {
+            Toast.makeText(context, "Cannot share file", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun openDownloadsFolder(context: Context) {
+        try {
+            val intent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Cannot open downloads folder", Toast.LENGTH_SHORT).show()
         }
     }
 }

@@ -33,7 +33,7 @@ object LocalMediaProxy {
     @Volatile
     private var lastProxyBaseUrl: String? = null
 
-    // URL to custom headers map for passing Referer, Cookie, and User-Agent upstream
+    // URL to custom headers map for passing Referer, Cookie, Origin, and User-Agent upstream
     private val urlHeadersMap = ConcurrentHashMap<String, Map<String, String>>()
 
     @Volatile
@@ -49,9 +49,29 @@ object LocalMediaProxy {
                 val base = targetUrl.substringBefore(path) + path.substring(0, lastSlash + 1)
                 urlHeadersMap[base] = headers
             }
+            uri.host?.let { host ->
+                urlHeadersMap["host:$host"] = headers
+            }
         } catch (e: Exception) {
             // Ignore URI parsing issues
         }
+    }
+
+    private fun getHeadersForUrl(url: String): Map<String, String>? {
+        urlHeadersMap[url]?.let { return it }
+        try {
+            val uri = URI(url)
+            val path = uri.path ?: ""
+            val lastSlash = path.lastIndexOf('/')
+            if (lastSlash != -1) {
+                val base = url.substringBefore(path) + path.substring(0, lastSlash + 1)
+                urlHeadersMap[base]?.let { return it }
+            }
+            uri.host?.let { host ->
+                urlHeadersMap["host:$host"]?.let { return it }
+            }
+        } catch (e: Exception) {}
+        return lastProxyBaseUrl?.let { urlHeadersMap[it] }
     }
 
     @Synchronized
@@ -254,8 +274,8 @@ object LocalMediaProxy {
                 conn.readTimeout = 20000
                 conn.instanceFollowRedirects = false
 
-                // Attach registered custom headers (Referer, Cookie, User-Agent) to bypass 403 anti-hotlinking
-                val registeredHeaders = urlHeadersMap[targetUrl] ?: lastProxyBaseUrl?.let { urlHeadersMap[it] }
+                // Attach registered custom headers (Referer, Cookie, User-Agent, Origin, Sec-Fetch-*) to bypass 403
+                val registeredHeaders = getHeadersForUrl(redirectUrl) ?: getHeadersForUrl(targetUrl)
                 if (registeredHeaders != null) {
                     for ((key, value) in registeredHeaders) {
                         val lower = key.lowercase()
@@ -268,7 +288,9 @@ object LocalMediaProxy {
                 for ((key, value) in clientHeaders) {
                     val lowerKey = key.lowercase()
                     if (lowerKey == "host" || lowerKey == "connection" || lowerKey == "range") continue
-                    conn.setRequestProperty(key, value)
+                    if (registeredHeaders?.containsKey(key) != true) {
+                        conn.setRequestProperty(key, value)
+                    }
                 }
                 
                 // Forward Range explicitly if requested by client
@@ -277,9 +299,30 @@ object LocalMediaProxy {
                     conn.setRequestProperty("Range", rangeEntry.value)
                 }
                 
-                // Fallback default User-Agent if client and registered headers didn't supply one
+                // Ensure essential CDN security & anti-hotlinking headers are set
                 if (conn.getRequestProperty("User-Agent") == null) {
-                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                }
+                if (conn.getRequestProperty("Accept") == null) {
+                    conn.setRequestProperty("Accept", "*/*")
+                }
+                if (conn.getRequestProperty("Sec-Fetch-Mode") == null) {
+                    conn.setRequestProperty("Sec-Fetch-Mode", "cors")
+                }
+                if (conn.getRequestProperty("Sec-Fetch-Site") == null) {
+                    conn.setRequestProperty("Sec-Fetch-Site", "cross-site")
+                }
+                if (conn.getRequestProperty("Sec-Fetch-Dest") == null) {
+                    conn.setRequestProperty("Sec-Fetch-Dest", "video")
+                }
+                if (conn.getRequestProperty("Origin") == null) {
+                    val ref = conn.getRequestProperty("Referer")
+                    if (!ref.isNullOrEmpty()) {
+                        try {
+                            val refUri = URI(ref)
+                            conn.setRequestProperty("Origin", "${refUri.scheme}://${refUri.authority}")
+                        } catch (e: Exception) {}
+                    }
                 }
                 
                 try {
@@ -319,8 +362,80 @@ object LocalMediaProxy {
                 out.flush()
                 return
             }
-            
+
+            val contentType = connection.contentType?.lowercase() ?: ""
+            val isM3u8Manifest = targetUrl.contains(".m3u8", ignoreCase = true) ||
+                    targetUrl.contains(".m3u", ignoreCase = true) ||
+                    contentType.contains("mpegurl")
+
             val out = socket.getOutputStream()
+
+            // If manifest, rewrite child URLs to route strictly through this local proxy
+            if (method != "HEAD" && responseCode in 200..299 && isM3u8Manifest) {
+                val inputStream = connection.inputStream
+                val manifestContent = inputStream.bufferedReader().readText()
+                inputStream.close()
+
+                val receiverIp = (socket.remoteSocketAddress as? java.net.InetSocketAddress)?.address?.hostAddress
+                val localIp = getLocalIpAddress(receiverIp)
+                val proxyBase = "http://$localIp:$proxyPort/proxy?url="
+                val registeredHeaders = getHeadersForUrl(targetUrl)
+
+                val keyUriRegex = Regex("""(URI\s*=\s*["'])([^"']+)(["'])""")
+                val rewrittenLines = manifestContent.lines().map { rawLine ->
+                    val line = rawLine.trim()
+                    when {
+                        line.isEmpty() -> rawLine
+                        line.startsWith("#EXT-X-KEY") || line.startsWith("#EXT-X-MAP") -> {
+                            keyUriRegex.replace(rawLine) { match ->
+                                val prefix = match.groupValues[1]
+                                val uriVal = match.groupValues[2]
+                                val suffix = match.groupValues[3]
+                                val resolvedUri = try {
+                                    URI(targetUrl).resolve(uriVal).toString()
+                                } catch (e: Exception) {
+                                    uriVal
+                                }
+                                if (registeredHeaders != null) {
+                                    registerUrlHeaders(resolvedUri, registeredHeaders)
+                                }
+                                "$prefix$proxyBase${URLEncoder.encode(resolvedUri, "UTF-8")}$suffix"
+                            }
+                        }
+                        line.startsWith("#") -> rawLine
+                        else -> {
+                            // Segment or sub-playlist URL
+                            var resolvedUrl = try {
+                                URI(targetUrl).resolve(line).toString()
+                            } catch (e: Exception) {
+                                if (line.startsWith("http://") || line.startsWith("https://")) line
+                                else "${lastProxyBaseUrl ?: ""}$line"
+                            }
+                            // Inherit query tokens from parent manifest if missing
+                            if (!resolvedUrl.contains("?") && targetUrl.contains("?")) {
+                                val query = targetUrl.substringAfter("?")
+                                resolvedUrl = "$resolvedUrl?$query"
+                            }
+                            if (registeredHeaders != null) {
+                                registerUrlHeaders(resolvedUrl, registeredHeaders)
+                            }
+                            "$proxyBase${URLEncoder.encode(resolvedUrl, "UTF-8")}"
+                        }
+                    }
+                }
+
+                val rewrittenBody = rewrittenLines.joinToString("\n").toByteArray(Charsets.UTF_8)
+                out.write("HTTP/1.1 $responseCode OK\r\n".toByteArray())
+                out.write("Access-Control-Allow-Origin: *\r\n".toByteArray())
+                out.write("Access-Control-Allow-Headers: *\r\n".toByteArray())
+                out.write("Content-Type: application/vnd.apple.mpegurl\r\n".toByteArray())
+                out.write("Content-Length: ${rewrittenBody.size}\r\n".toByteArray())
+                out.write("Connection: close\r\n\r\n".toByteArray())
+                out.write(rewrittenBody)
+                out.flush()
+                return
+            }
+            
             out.write("HTTP/1.1 $responseCode ${connection.responseMessage}\r\n".toByteArray())
             out.write("Access-Control-Allow-Origin: *\r\n".toByteArray())
             out.write("Access-Control-Allow-Headers: *\r\n".toByteArray())
@@ -341,7 +456,7 @@ object LocalMediaProxy {
             if (method != "HEAD") {
                 val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
                 if (stream != null) {
-                    val buffer = ByteArray(16384)
+                    val buffer = ByteArray(65536)
                     var bytesRead: Int
                     while (stream.read(buffer).also { bytesRead = it } != -1) {
                         out.write(buffer, 0, bytesRead)

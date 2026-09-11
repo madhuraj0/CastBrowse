@@ -66,8 +66,9 @@ class CastWizardActivity : ComponentActivity() {
 
         val prefs = EncryptedStorage.getPreferences(this)
         val themeMode = prefs.getString("theme_mode", "dark") ?: "dark"
+        val dynamicColor = prefs.getBoolean("dynamic_color", false)
         setContent {
-            CastBrowseTheme(themeMode = themeMode) {
+            CastBrowseTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
                 WizardScreen()
             }
         }

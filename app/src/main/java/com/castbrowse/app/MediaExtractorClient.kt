@@ -435,9 +435,13 @@ class MediaExtractorClient(
                 }
             }
 
-            // Cache request headers (Cookies, User-Agent, Referer) for anti-hotlink proxy and downloads
-            val headers = request.requestHeaders
-            if (headers != null && headers.isNotEmpty()) {
+            // Cache request headers (Cookies, User-Agent, Referer, Origin) for anti-hotlink proxy and downloads
+            val headers = request.requestHeaders?.toMutableMap() ?: mutableMapOf()
+            val cookies = try { android.webkit.CookieManager.getInstance().getCookie(url) } catch (e: Exception) { null }
+            if (!cookies.isNullOrEmpty() && !headers.containsKey("Cookie")) {
+                headers["Cookie"] = cookies
+            }
+            if (headers.isNotEmpty()) {
                 LocalMediaProxy.registerUrlHeaders(url, headers)
             }
 

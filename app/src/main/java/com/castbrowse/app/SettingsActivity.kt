@@ -1,12 +1,12 @@
 package com.castbrowse.app
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,14 +40,20 @@ class SettingsActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         val prefs = EncryptedStorage.getPreferences(this)
         var themeMode by mutableStateOf(prefs.getString("theme_mode", "dark") ?: "dark")
+        var dynamicColor by mutableStateOf(prefs.getBoolean("dynamic_color", false))
 
         setContent {
-            CastBrowseTheme(themeMode = themeMode) {
+            CastBrowseTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
                 SettingsScreen(
                     currentTheme = themeMode,
+                    isDynamicColor = dynamicColor,
                     onThemeChange = { newTheme ->
                         themeMode = newTheme
                         prefs.edit().putString("theme_mode", newTheme).apply()
+                    },
+                    onDynamicColorChange = { enabled ->
+                        dynamicColor = enabled
+                        prefs.edit().putBoolean("dynamic_color", enabled).apply()
                     },
                     onBack = { finish() }
                 )
@@ -60,7 +66,9 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 fun SettingsScreen(
     currentTheme: String,
+    isDynamicColor: Boolean,
     onThemeChange: (String) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -70,19 +78,20 @@ fun SettingsScreen(
     var isPopupsEnabled by remember { mutableStateOf(prefs.getBoolean("popups_enabled", false)) }
     var isDesktopDefault by remember { mutableStateOf(prefs.getBoolean("desktop_mode", false)) }
     var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", false)) }
+    var isTabBarEnabled by remember { mutableStateOf(prefs.getBoolean("show_tab_bar", true)) }
     var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
 
     var showThemeDialog by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
-    var showPanicDialog by remember { mutableStateOf(false) }
+    var showClearSessionDialog by remember { mutableStateOf(false) }
     var isUpdatingAdblock by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             Surface(
                 color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
+                tonalElevation = 2.dp,
                 shadowElevation = 2.dp
             ) {
                 TopAppBar(
@@ -117,17 +126,11 @@ fun SettingsScreen(
                 .background(MaterialTheme.colorScheme.background)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. Appearance Section
             SettingsSection(title = "Appearance") {
-                val themeLabel = when (currentTheme) {
-                    "light" -> "Light"
-                    "dark" -> "Dark"
-                    "amoled" -> "AMOLED Black"
-                    "dynamic" -> "Material You"
-                    else -> "System Default"
-                }
+                val themeLabel = if (currentTheme == "light") "Light" else "Dark"
 
                 SettingsActionItem(
                     title = "Theme",
@@ -136,11 +139,35 @@ fun SettingsScreen(
                     onClick = { showThemeDialog = true }
                 )
 
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+                    SettingsToggleItem(
+                        title = "Material You",
+                        subtitle = "Wallpaper accent colors",
+                        icon = Icons.Default.Star,
+                        checked = isDynamicColor,
+                        onCheckedChange = onDynamicColorChange
+                    )
+                }
+
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsToggleItem(
-                    title = "Desktop Site by Default",
-                    subtitle = "Always request full desktop version of websites",
+                    title = "Top Tab Bar",
+                    subtitle = "Show tab bar strip",
+                    icon = Icons.Default.PlayArrow,
+                    checked = isTabBarEnabled,
+                    onCheckedChange = {
+                        isTabBarEnabled = it
+                        prefs.edit().putBoolean("show_tab_bar", it).apply()
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
+                SettingsToggleItem(
+                    title = "Desktop Site",
+                    subtitle = "Request desktop version",
                     icon = Icons.Default.Settings,
                     checked = isDesktopDefault,
                     onCheckedChange = {
@@ -153,7 +180,7 @@ fun SettingsScreen(
 
                 SettingsToggleItem(
                     title = "Bottom Address Bar",
-                    subtitle = "Move navigation controls and address bar to the bottom for one-handed reach",
+                    subtitle = "Controls at bottom",
                     icon = Icons.Default.Settings,
                     checked = isBottomBarEnabled,
                     onCheckedChange = {
@@ -167,7 +194,7 @@ fun SettingsScreen(
             SettingsSection(title = "Privacy & Security") {
                 SettingsToggleItem(
                     title = "Adblock Shield",
-                    subtitle = "Block ads, malicious trackers, and telemetry domains",
+                    subtitle = "Block ads and trackers",
                     icon = Icons.Default.Star,
                     checked = isAdBlockEnabled,
                     onCheckedChange = {
@@ -179,20 +206,19 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsActionItem(
-                    title = "Update Adblock Filter List",
-                    subtitle = if (isUpdatingAdblock) "Downloading Steven Black hosts..." else "Fetch latest hosts from Steven Black GitHub",
+                    title = "Update Adblock Filters",
+                    subtitle = if (isUpdatingAdblock) "Updating..." else "Steven Black hosts",
                     icon = Icons.Default.Refresh,
                     onClick = {
                         if (!isUpdatingAdblock) {
                             isUpdatingAdblock = true
-                            Toast.makeText(context, "Updating adblock filters...", Toast.LENGTH_SHORT).show()
                             MediaExtractorClient.updateAdHosts(context) { success, count ->
                                 isUpdatingAdblock = false
-                                if (success) {
-                                    Toast.makeText(context, "Adblock list updated! $count hosts loaded.", Toast.LENGTH_LONG).show()
-                                } else {
-                                    Toast.makeText(context, "Failed to update adblock list. Check internet connection.", Toast.LENGTH_SHORT).show()
-                                }
+                                Toast.makeText(
+                                    context,
+                                    if (success) "$count hosts loaded" else "Update failed",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                         }
                     }
@@ -201,8 +227,8 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsToggleItem(
-                    title = "Block Popups & Redirects",
-                    subtitle = "Prevent websites from opening unsolicited new windows",
+                    title = "Block Popups",
+                    subtitle = "Prevent popups and redirects",
                     icon = Icons.Default.Close,
                     checked = !isPopupsEnabled,
                     onCheckedChange = {
@@ -214,8 +240,8 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsToggleItem(
-                    title = "Record Browsing History",
-                    subtitle = "Locally store visited pages for quick retrieval",
+                    title = "Browsing History",
+                    subtitle = "Save visited links",
                     icon = Icons.AutoMirrored.Filled.List,
                     checked = isHistoryEnabled,
                     onCheckedChange = {
@@ -228,7 +254,7 @@ fun SettingsScreen(
 
                 SettingsActionItem(
                     title = "Clear Browsing Data",
-                    subtitle = "View and remove search history, visited links, and cached states",
+                    subtitle = "History and cookies",
                     icon = Icons.Default.Delete,
                     onClick = {
                         val intent = Intent(context, HistoryActivity::class.java)
@@ -240,8 +266,8 @@ fun SettingsScreen(
             // 3. Casting & Media Controls
             SettingsSection(title = "Casting & FCast") {
                 SettingsActionItem(
-                    title = "FCast Connection Wizard",
-                    subtitle = "Discover and pair with Android TV and FCast receivers",
+                    title = "FCast Wizard",
+                    subtitle = "Pair receivers",
                     icon = Icons.Default.PlayArrow,
                     onClick = {
                         val intent = Intent(context, CastWizardActivity::class.java)
@@ -252,8 +278,8 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsActionItem(
-                    title = "Cast Control Panel",
-                    subtitle = "Manage active playback, seek bar, and volume controls",
+                    title = "Cast Control",
+                    subtitle = "Playback controls",
                     icon = Icons.Default.PlayArrow,
                     onClick = {
                         val intent = Intent(context, CastControlActivity::class.java)
@@ -264,8 +290,8 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsActionItem(
-                    title = "Anti-Hotlink Media Proxy",
-                    subtitle = "Dynamic port: ${LocalMediaProxy.proxyPort} • RFC 3986 HLS segment resolving active",
+                    title = "Local Media Proxy",
+                    subtitle = "Port ${LocalMediaProxy.proxyPort} • VPN leak safe",
                     icon = Icons.Default.Check,
                     onClick = {
                         Toast.makeText(context, "Proxy active on port ${LocalMediaProxy.proxyPort}", Toast.LENGTH_SHORT).show()
@@ -273,11 +299,11 @@ fun SettingsScreen(
                 )
             }
 
-            // 4. About & Privacy Policy
-            SettingsSection(title = "About & Privacy") {
+            // 4. About
+            SettingsSection(title = "About") {
                 SettingsActionItem(
-                    title = "Privacy Guarantee",
-                    subtitle = "100% on-device operation. Zero telemetry, zero analytics.",
+                    title = "Privacy",
+                    subtitle = "100% on-device, zero tracking",
                     icon = Icons.Default.Info,
                     onClick = { showPrivacyDialog = true }
                 )
@@ -285,8 +311,8 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsActionItem(
-                    title = "Credits & Open Source Licenses",
-                    subtitle = "FCast, Steven Black Hosts, Android Jetpack, OkHttp",
+                    title = "Credits",
+                    subtitle = "FCast, Steven Black, Jetpack",
                     icon = Icons.Default.Info,
                     onClick = { showCreditsDialog = true }
                 )
@@ -295,20 +321,19 @@ fun SettingsScreen(
 
                 SettingsActionItem(
                     title = "Version",
-                    subtitle = "CastBrowse v1.2.0 (Build 3)",
+                    subtitle = "CastBrowse v1.4.0",
                     icon = Icons.Default.Info,
                     onClick = {}
                 )
             }
 
-            // 5. Destructive Session Wipe
+            // 5. Clear Session
             Surface(
-                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { showPanicDialog = true }
+                    .clickable { showClearSessionDialog = true }
                     .padding(16.dp)
             ) {
                 Row(
@@ -317,19 +342,19 @@ fun SettingsScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = "Panic Wipe",
+                        contentDescription = "Clear Session",
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(24.dp)
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Clear Session & Panic Wipe",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
+                            "Clear Session & Exit",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.error
                         )
                         Text(
-                            "Immediately terminates active casts, wipes history, tabs, cookies and session storage",
+                            "Wipe tabs, cookies, and exit",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -337,35 +362,32 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
-    // Theme Picker Dialog
+    // Theme Picker Dialog (Restricted strictly to Light & Dark)
     if (showThemeDialog) {
         Dialog(onDismissRequest = { showThemeDialog = false }) {
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surface,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                modifier = Modifier.width(280.dp)
+                modifier = Modifier.width(260.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        "Choose Theme",
+                        "Theme",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     listOf(
-                        "light" to "Light",
-                        "dark" to "Dark",
-                        "amoled" to "AMOLED Black",
-                        "system" to "System Default",
-                        "dynamic" to "Material You"
+                        "dark" to "Dark (OLED Black)",
+                        "light" to "Light"
                     ).forEach { (mode, label) ->
                         Row(
                             modifier = Modifier
@@ -379,7 +401,7 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = currentTheme == mode,
+                                selected = (currentTheme == mode) || (mode == "dark" && currentTheme != "light"),
                                 onClick = {
                                     onThemeChange(mode)
                                     showThemeDialog = false
@@ -395,30 +417,22 @@ fun SettingsScreen(
         }
     }
 
-    // Privacy Guarantee Dialog
+    // Privacy Dialog
     if (showPrivacyDialog) {
         AlertDialog(
             onDismissRequest = { showPrivacyDialog = false },
-            title = { Text("Privacy Policy", fontWeight = FontWeight.Bold) },
+            title = { Text("Privacy", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "CastBrowse operates 100% locally on your Android device.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "• Zero telemetry or analytical tracking.\n" +
-                        "• No account registration or external server dependencies.\n" +
-                        "• Cookies and session headers are proxied purely to authorize video streams on your local FCast receiver.\n" +
-                        "• Screenshot & screen-record protection is enforced via FLAG_SECURE.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("• 100% on-device operation", style = MaterialTheme.typography.bodyMedium)
+                    Text("• Zero tracking or analytics", style = MaterialTheme.typography.bodyMedium)
+                    Text("• Local proxy for stream casting", style = MaterialTheme.typography.bodyMedium)
+                    Text("• Screen recording protection enabled", style = MaterialTheme.typography.bodyMedium)
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showPrivacyDialog = false }) {
-                    Text("OK")
+                    Text("Close")
                 }
             },
             shape = RoundedCornerShape(20.dp)
@@ -429,49 +443,39 @@ fun SettingsScreen(
     if (showCreditsDialog) {
         AlertDialog(
             onDismissRequest = { showCreditsDialog = false },
-            title = { Text("Credits & Collaborators", fontWeight = FontWeight.Bold) },
+            title = { Text("Credits", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Open Source Projects:\n" +
-                        "• FCast protocol & client\n" +
-                        "• Steven Black Adblock Hosts\n" +
-                        "• Kotlin Coroutines & Android Jetpack\n" +
-                        "• OkHttp & SSDP Discovery",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        "Collaborators:\n" +
-                        "• madhuraj0 (Idea, Design Direction & Testing)\n" +
-                        "• Antigravity (Advanced AI Assistant)",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("• FCast Protocol", style = MaterialTheme.typography.bodyMedium)
+                    Text("• Steven Black Hosts", style = MaterialTheme.typography.bodyMedium)
+                    Text("• Android Jetpack & Compose", style = MaterialTheme.typography.bodyMedium)
+                    Text("• madhuraj0 & Antigravity", style = MaterialTheme.typography.bodyMedium)
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showCreditsDialog = false }) {
-                    Text("OK")
+                    Text("Close")
                 }
             },
             shape = RoundedCornerShape(20.dp)
         )
     }
 
-    // Panic Wipe Dialog
-    if (showPanicDialog) {
+    // Clear Session Dialog
+    if (showClearSessionDialog) {
         AlertDialog(
-            onDismissRequest = { showPanicDialog = false },
-            title = { Text("Panic Wipe Session?", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
+            onDismissRequest = { showClearSessionDialog = false },
+            title = { Text("Clear Session?", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "This will immediately terminate all casting sessions, erase all history, cookies, cached tabs, and exit the application.",
+                    "Wipes all cookies, cached tabs, active casts, and exits.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        showPanicDialog = false
+                        showClearSessionDialog = false
                         val intent = Intent(context, MainActivity::class.java).apply {
                             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                             putExtra("EXTRA_PANIC_WIPE", true)
@@ -479,11 +483,11 @@ fun SettingsScreen(
                         context.startActivity(intent)
                     }
                 ) {
-                    Text("Wipe Everything", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    Text("Clear & Exit", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showPanicDialog = false }) {
+                TextButton(onClick = { showClearSessionDialog = false }) {
                     Text("Cancel")
                 }
             },
@@ -503,18 +507,16 @@ fun SettingsSection(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 4.dp)
+            modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
         )
         Surface(
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(
-                modifier = Modifier.padding(vertical = 4.dp),
-                content = content
-            )
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                content()
+            }
         }
     }
 }
@@ -531,33 +533,40 @@ fun SettingsActionItem(
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.width(16.dp))
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Icon(
             imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }
@@ -575,32 +584,38 @@ fun SettingsToggleItem(
             .fillMaxWidth()
             .clickable { onCheckedChange(!checked) }
             .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.width(16.dp))
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.size(36.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
-            modifier = Modifier.padding(start = 8.dp)
+            onCheckedChange = onCheckedChange
         )
     }
 }

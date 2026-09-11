@@ -477,8 +477,9 @@ class MainActivity : ComponentActivity() {
             val context = androidx.compose.ui.platform.LocalContext.current
             val prefs = remember { EncryptedStorage.getPreferences(context) }
             var themeMode by remember { mutableStateOf(prefs.getString("theme_mode", "dark") ?: "dark") }
+            val dynamicColor = prefs.getBoolean("dynamic_color", false)
 
-            CastBrowseTheme(themeMode = themeMode) {
+            CastBrowseTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
                 MainScreen(
                     themeMode = themeMode,
                     onThemeModeChange = { newMode ->
@@ -645,18 +646,21 @@ class MainActivity : ComponentActivity() {
             val activeTabUrl = tabs.firstOrNull { it.id == activeTabId }?.url
             if (!activeTabUrl.isNullOrEmpty()) {
                 headers["Referer"] = activeTabUrl
+                try {
+                    val uri = Uri.parse(activeTabUrl)
+                    headers["Origin"] = "${uri.scheme}://${uri.authority}"
+                } catch (e: Exception) {}
             }
+            headers["Sec-Fetch-Mode"] = "cors"
+            headers["Sec-Fetch-Site"] = "cross-site"
+            headers["Sec-Fetch-Dest"] = "video"
             val cookies = try { android.webkit.CookieManager.getInstance().getCookie(videoUrl) } catch (e: Exception) { null }
             if (!cookies.isNullOrEmpty()) {
                 headers["Cookie"] = cookies
             }
 
-            val hasHeaders = !cookies.isNullOrEmpty() || (!activeTabUrl.isNullOrEmpty() && (videoUrl.contains(".m3u8") || videoUrl.contains(".mpd")))
-            val proxiedUrl = if (hasHeaders) {
-                LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
-            } else {
-                videoUrl
-            }
+            // Always route through LocalMediaProxy so receiver never leaks IP to internet and bypasses 403
+            val proxiedUrl = LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
             android.util.Log.d("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort -> $proxiedUrl")
             val cleanTitle = videoTitle.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(videoUrl) }
             val result = FCastClient.play(
@@ -664,7 +668,7 @@ class MainActivity : ComponentActivity() {
                 url = proxiedUrl,
                 title = cleanTitle,
                 port = targetPort,
-                headers = if (proxiedUrl != videoUrl) null else headers
+                headers = null
             ) {
                 lifecycleScope.launch {
                     CastPlaybackService.stop(this@MainActivity)
@@ -723,11 +727,12 @@ class MainActivity : ComponentActivity() {
         var showMoreActionsSheet by remember { mutableStateOf(false) }
         var showPageInfoDialog by remember { mutableStateOf(false) }
         var showBookmarksDialog by remember { mutableStateOf(false) }
-        var showDownloadsDialog by remember { mutableStateOf(false) }
+        var showPanicDialog by remember { mutableStateOf(false) }
         var showTabSwitcher by remember { mutableStateOf(false) }
         var detailedVideoForDialog by remember { mutableStateOf<ExtractedVideo?>(null) }
         val prefs = remember { EncryptedStorage.getPreferences(context) }
         val isBottomAddressBar = remember { prefs.getBoolean("bottom_address_bar", false) }
+        val showTabBar = remember { prefs.getBoolean("show_tab_bar", true) }
 
         val switchTab: (Int) -> Unit = { targetId ->
             if (targetId != activeTabId) {
@@ -869,7 +874,7 @@ class MainActivity : ComponentActivity() {
                 shadowElevation = 4.dp
             ) {
                 Column(modifier = if (isBottom) Modifier.navigationBarsPadding() else Modifier.statusBarsPadding()) {
-                    if (!isBottom) {
+                    if (!isBottom && showTabBar) {
                         tabsRow()
                     }
 
@@ -1176,27 +1181,18 @@ class MainActivity : ComponentActivity() {
                                         }
                                     )
 
-                                    // Downloads (opens Download Manager)
+                                    // Downloads (opens full DownloadsActivity)
                                     DropdownMenuItem(
                                         text = { Text("Downloads") },
                                         leadingIcon = { Icon(DownloadIcon, contentDescription = null) },
                                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                         onClick = {
                                             showMoreActionsSheet = false
-                                            showDownloadsDialog = true
+                                            val intent = Intent(context, DownloadsActivity::class.java)
+                                            context.startActivity(intent)
                                         }
                                     )
 
-                                    // Tabs Switcher
-                                    DropdownMenuItem(
-                                        text = { Text("Tabs (${tabs.size})") },
-                                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                        onClick = {
-                                            showMoreActionsSheet = false
-                                            showTabSwitcher = true
-                                        }
-                                    )
 
                                     // Find in Page
                                     DropdownMenuItem(
@@ -1274,12 +1270,23 @@ class MainActivity : ComponentActivity() {
                                             context.startActivity(intent)
                                         }
                                     )
+
+                                    // Clear Session
+                                    DropdownMenuItem(
+                                        text = { Text("Clear Session", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            showPanicDialog = true
+                                        }
+                                    )
                                 }
                             }
                         }
                     }
 
-                    if (isBottom) {
+                    if (isBottom && showTabBar) {
                         tabsRow()
                     }
 
@@ -1770,26 +1777,13 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    text = if (isHttps) 
-                                        "Your information (for example, passwords or cookies) is private and encrypted when sent to this site."
-                                    else 
-                                        "You should not enter any sensitive information on this site, because it could be seen by attackers.",
+                                    text = if (isHttps) "Connection is encrypted" else "Connection is not encrypted",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            }
-                        }
-
-                        // Protections info card
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("• Adblock Shield: Active", style = MaterialTheme.typography.labelMedium)
-                                Text("• Detected Streams: ${extractedVideos.size}", style = MaterialTheme.typography.labelMedium)
-                                Text("• Anti-Hotlink Proxy: 127.0.0.1:8888", style = MaterialTheme.typography.labelMedium)
+                                Text("• Adblock: Active", style = MaterialTheme.typography.labelMedium)
+                                Text("• Streams: ${extractedVideos.size}", style = MaterialTheme.typography.labelMedium)
+                                Text("• Proxy: Port ${LocalMediaProxy.proxyPort}", style = MaterialTheme.typography.labelMedium)
                             }
                         }
 
@@ -1953,153 +1947,31 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        // Integrated Media Downloads Dialog
-        if (showDownloadsDialog) {
-            var downloadsList by remember(showDownloadsDialog) {
-                mutableStateOf(DownloadHelper.getDownloads(context))
-            }
-            LaunchedEffect(showDownloadsDialog) {
-                while (showDownloadsDialog) {
-                    delay(1500)
-                    downloadsList = DownloadHelper.getDownloads(context)
-                }
-            }
+        // Clear Session / Panic Wipe Confirmation Dialog
+        if (showPanicDialog) {
             AlertDialog(
-                onDismissRequest = { showDownloadsDialog = false },
-                icon = {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            DownloadIcon,
-                            contentDescription = "Downloads",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                },
-                title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Downloads (${downloadsList.size})",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                },
+                onDismissRequest = { showPanicDialog = false },
+                title = { Text("Clear Session?", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
                 text = {
-                    if (downloadsList.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(160.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    DownloadIcon,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "No downloads yet",
-                                    color = MaterialTheme.colorScheme.outline,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 400.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(downloadsList) { item ->
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable(enabled = item.status == android.app.DownloadManager.STATUS_SUCCESSFUL) {
-                                            DownloadHelper.openDownloadedFile(context, item)
-                                        }
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = item.title,
-                                                fontWeight = FontWeight.SemiBold,
-                                                fontSize = 14.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            IconButton(
-                                                onClick = {
-                                                    DownloadHelper.removeDownload(context, item.id)
-                                                    downloadsList = DownloadHelper.getDownloads(context)
-                                                },
-                                                modifier = Modifier.size(28.dp)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Delete,
-                                                    contentDescription = "Delete",
-                                                    tint = MaterialTheme.colorScheme.error,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        val statusText = when (item.status) {
-                                            android.app.DownloadManager.STATUS_SUCCESSFUL -> "Completed"
-                                            android.app.DownloadManager.STATUS_RUNNING -> "Downloading (${item.progress}%)"
-                                            android.app.DownloadManager.STATUS_PENDING -> "Pending"
-                                            android.app.DownloadManager.STATUS_PAUSED -> "Paused"
-                                            else -> "Failed"
-                                        }
-                                        val statusColor = when (item.status) {
-                                            android.app.DownloadManager.STATUS_SUCCESSFUL -> MaterialTheme.colorScheme.primary
-                                            android.app.DownloadManager.STATUS_RUNNING -> MaterialTheme.colorScheme.tertiary
-                                            else -> MaterialTheme.colorScheme.outline
-                                        }
-                                        Text(
-                                            text = "$statusText • ${DownloadHelper.formatBytes(item.bytesDownloaded)} / ${if (item.totalBytes > 0) DownloadHelper.formatBytes(item.totalBytes) else "Unknown"}",
-                                            fontSize = 12.sp,
-                                            color = statusColor
-                                        )
-                                        if (item.status == android.app.DownloadManager.STATUS_RUNNING && item.progress in 0..100) {
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            LinearProgressIndicator(
-                                                progress = { item.progress / 100f },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(4.dp)
-                                                    .clip(RoundedCornerShape(2.dp))
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        "Wipes tabs, cookies, active casts, and exits.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 },
                 confirmButton = {
-                    TextButton(onClick = { showDownloadsDialog = false }) { Text("Close") }
+                    TextButton(
+                        onClick = {
+                            showPanicDialog = false
+                            triggerPanicWipe()
+                        }
+                    ) {
+                        Text("Clear & Exit", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    }
                 },
-                shape = RoundedCornerShape(24.dp),
+                dismissButton = {
+                    TextButton(onClick = { showPanicDialog = false }) { Text("Cancel") }
+                },
+                shape = RoundedCornerShape(20.dp),
                 containerColor = MaterialTheme.colorScheme.surface
             )
         }

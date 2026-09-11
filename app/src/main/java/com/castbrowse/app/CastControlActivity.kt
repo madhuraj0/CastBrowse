@@ -72,8 +72,9 @@ class CastControlActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         val prefs = EncryptedStorage.getPreferences(this)
         val themeMode = prefs.getString("theme_mode", "dark") ?: "dark"
+        val dynamicColor = prefs.getBoolean("dynamic_color", false)
         setContent {
-            CastBrowseTheme(themeMode = themeMode) {
+            CastBrowseTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
                 ControlScreen()
             }
         }
