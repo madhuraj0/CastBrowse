@@ -43,6 +43,7 @@ class MediaExtractorClient(
     companion object {
         private const val TAG = "MediaExtractorClient"
         private val MEDIA_REGEX = Regex("\\.(mp4|webm|m3u8|m3u|mpd|ogg|mkv)(\\?.*)?$", RegexOption.IGNORE_CASE)
+        private val DYNAMIC_STREAM_REGEX = Regex("(?i)(\\.m3u8|\\.mp4|\\.webm|\\.mpd|\\.m4s|\\.ts|/playlist|/manifest|/master|/chunklist)")
 
         // Fallback static list — used as emergency safety net when adHostsSet is empty
         private val AD_DOMAINS = hashSetOf(
@@ -62,8 +63,12 @@ class MediaExtractorClient(
         // App-lifetime managed scope — no lifecycle leaks; SupervisorJob prevents cascading failure
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-        // Singleton OkHttpClient shared across all update calls and thumbnail loading — reuses connection pool & thread pool
-        internal val httpClient by lazy { OkHttpClient() }
+        // Singleton OkHttpClient shared across all update calls and thumbnail loading — uses DNS-over-HTTPS resolver
+        internal val httpClient by lazy {
+            OkHttpClient.Builder()
+                .dns(DnsOverHttpsResolver)
+                .build()
+        }
 
         fun loadAdHosts(context: Context) {
             if (isLoaded) return
@@ -230,6 +235,22 @@ class MediaExtractorClient(
                     }
                 }
 
+                // Dynamic playback interception: Hook HTMLMediaElement prototype
+                try {
+                    var origSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+                    if (origSrcDesc && origSrcDesc.set) {
+                        var origSet = origSrcDesc.set;
+                        Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+                            set: function(val) {
+                                if (val && typeof val === 'string') {
+                                    reportVideo(val, this.poster || "", "", "", "");
+                                }
+                                return origSet.call(this, val);
+                            }
+                        });
+                    }
+                } catch(e) {}
+
                 function checkVideoElement(v) {
                     if (!v) return;
                     var src = v.src || v.currentSrc;
@@ -378,7 +399,14 @@ class MediaExtractorClient(
                     return WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 }
             }
-            if (isMediaUrl(url)) {
+
+            // Cache request headers (Cookies, User-Agent, Referer) for anti-hotlink proxy and downloads
+            val headers = request.requestHeaders
+            if (headers != null && headers.isNotEmpty()) {
+                LocalMediaProxy.registerUrlHeaders(url, headers)
+            }
+
+            if (isMediaUrl(url, headers)) {
                 val filename = extractFilenameFromUrl(url)
                 onMediaDiscovered(ExtractedVideo(url = url, title = filename))
             }
@@ -440,9 +468,16 @@ class MediaExtractorClient(
         }
     }
 
-    private fun isMediaUrl(url: String): Boolean {
-        val path = Uri.parse(url).path ?: return false
-        return MEDIA_REGEX.containsMatchIn(path)
+    private fun isMediaUrl(url: String, headers: Map<String, String>? = null): Boolean {
+        val path = try { Uri.parse(url).path ?: "" } catch (e: Exception) { "" }
+        if (MEDIA_REGEX.containsMatchIn(path) || DYNAMIC_STREAM_REGEX.containsMatchIn(url)) {
+            return true
+        }
+        val accept = headers?.get("Accept") ?: headers?.get("accept")
+        if (accept != null && (accept.contains("video/") || accept.contains("mpegurl") || accept.contains("dash+xml"))) {
+            return true
+        }
+        return false
     }
 
     private fun isLocalUrl(url: String): Boolean {

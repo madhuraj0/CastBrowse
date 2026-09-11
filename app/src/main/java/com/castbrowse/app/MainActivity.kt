@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -23,6 +25,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -272,6 +280,67 @@ private val LockIcon: ImageVector by lazy {
     }.build()
 }
 
+// Inline Download icon
+private val DownloadIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(19f, 9f)
+        horizontalLineTo(15f)
+        verticalLineTo(3f)
+        horizontalLineTo(9f)
+        verticalLineTo(9f)
+        horizontalLineTo(5f)
+        lineTo(12f, 16f)
+        lineTo(19f, 9f)
+        close()
+        moveTo(5f, 18f)
+        verticalLineTo(20f)
+        horizontalLineTo(19f)
+        verticalLineTo(18f)
+        horizontalLineTo(5f)
+        close()
+    }.build()
+}
+
+// Inline Tab / Window icon
+private val TabWindowIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(19f, 4f)
+        horizontalLineTo(5f)
+        curveTo(3.89f, 4f, 3f, 4.89f, 3f, 6f)
+        verticalLineTo(18f)
+        curveTo(3f, 19.1f, 3.89f, 20f, 5f, 20f)
+        horizontalLineTo(19f)
+        curveTo(20.1f, 20f, 21f, 19.1f, 21f, 18f)
+        verticalLineTo(6f)
+        curveTo(21f, 4.89f, 20.1f, 4f, 19f, 4f)
+        close()
+        moveTo(19f, 7f)
+        horizontalLineTo(5f)
+        verticalLineTo(6f)
+        horizontalLineTo(19f)
+        verticalLineTo(7f)
+        close()
+        moveTo(19f, 18f)
+        horizontalLineTo(5f)
+        verticalLineTo(9f)
+        horizontalLineTo(19f)
+        verticalLineTo(18f)
+        close()
+    }.build()
+}
+
 data class BookmarkItem(
     val url: String,
     val title: String,
@@ -486,6 +555,20 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_RUNNING_LOW) {
+            webView?.clearCache(false)
+            if (tabStates.size > 5) {
+                val keysToRemove = tabStates.keys.filter { it != activeTabId }.drop(4)
+                keysToRemove.forEach {
+                    tabStates.remove(it)
+                    tabVideos.remove(it)
+                }
+            }
+        }
+    }
+
     private fun triggerPanicWipe() {
         lifecycleScope.launch {
             Toast.makeText(this@MainActivity, "Wiping all session data...", Toast.LENGTH_SHORT).show()
@@ -633,8 +716,51 @@ class MainActivity : ComponentActivity() {
         var showMoreActionsSheet by remember { mutableStateOf(false) }
         var showPageInfoDialog by remember { mutableStateOf(false) }
         var showBookmarksDialog by remember { mutableStateOf(false) }
+        var showDownloadsDialog by remember { mutableStateOf(false) }
+        var showTabSwitcher by remember { mutableStateOf(false) }
         var detailedVideoForDialog by remember { mutableStateOf<ExtractedVideo?>(null) }
         val prefs = remember { EncryptedStorage.getPreferences(context) }
+        val isBottomAddressBar = remember { prefs.getBoolean("bottom_address_bar", false) }
+
+        val switchTab: (Int) -> Unit = { targetId ->
+            if (targetId != activeTabId) {
+                val oldBundle = Bundle()
+                webView?.saveState(oldBundle)
+                tabStates[activeTabId] = oldBundle
+                tabVideos[activeTabId] = extractedVideos.toList()
+
+                activeTabId = targetId
+            }
+        }
+
+        val createNewTab: (String) -> Unit = { url ->
+            val oldBundle = Bundle()
+            webView?.saveState(oldBundle)
+            tabStates[activeTabId] = oldBundle
+            tabVideos[activeTabId] = extractedVideos.toList()
+
+            val nextId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
+            tabs.add(BrowserTab(nextId, "New Tab", url))
+            activeTabId = nextId
+            extractedVideos.clear()
+        }
+
+        val closeTab: (BrowserTab) -> Unit = { tab ->
+            val idx = tabs.indexOf(tab)
+            val closingId = tab.id
+            tabStates.remove(closingId)
+            tabVideos.remove(closingId)
+            tabs.remove(tab)
+            if (activeTabId == closingId) {
+                if (tabs.isNotEmpty()) {
+                    activeTabId = tabs.getOrNull(idx)?.id ?: tabs.last().id
+                } else {
+                    val newId = 1
+                    tabs.add(BrowserTab(newId, "DuckDuckGo", "https://html.duckduckgo.com"))
+                    activeTabId = newId
+                }
+            }
+        }
         var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
         var isAdBlockEnabled by remember { mutableStateOf(true) }
         var isPopupsEnabled by remember { mutableStateOf(false) }
@@ -660,108 +786,84 @@ class MainActivity : ComponentActivity() {
             webView?.goBack()
         }
 
-        Scaffold(
-        topBar = {
+        val tabsRow = @Composable {
+            ScrollableTabRow(
+                selectedTabIndex = tabs.indexOfFirst { it.id == activeTabId }.coerceAtLeast(0),
+                edgePadding = 8.dp,
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                indicator = {},
+                divider = {}
+            ) {
+                tabs.forEach { tab ->
+                    val isActive = tab.id == activeTabId
+                    Tab(
+                        selected = isActive,
+                        onClick = { switchTab(tab.id) },
+                        modifier = Modifier
+                            .padding(top = 4.dp, bottom = 4.dp, start = 4.dp)
+                            .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                            .background(
+                                if (isActive) MaterialTheme.colorScheme.surface
+                                else Color.Transparent
+                            )
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = tab.title,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.widthIn(max = 100.dp)
+                            )
+                            if (tabs.size > 1) {
+                                IconButton(
+                                    onClick = { closeTab(tab) },
+                                    modifier = Modifier.size(16.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close tab",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Add tab button (+) at the end
+                IconButton(
+                    onClick = { createNewTab("https://html.duckduckgo.com") },
+                    modifier = Modifier
+                        .padding(start = 4.dp, end = 8.dp)
+                        .size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "New Tab",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        val browserControls = @Composable { isBottom: Boolean ->
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 4.dp,
                 shadowElevation = 4.dp
             ) {
-                Column(modifier = Modifier.statusBarsPadding()) {
-                    // Chrome-style Horizontal Tab Bar (top-most)
-                    ScrollableTabRow(
-                        selectedTabIndex = tabs.indexOfFirst { it.id == activeTabId }.coerceAtLeast(0),
-                        edgePadding = 8.dp,
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        indicator = {}, // No standard line indicator, tabs are self-contained shapes like Chrome desktop tabs
-                        divider = {}
-                    ) {
-                        tabs.forEach { tab ->
-                            val isActive = tab.id == activeTabId
-                            Tab(
-                                selected = isActive,
-                                onClick = {
-                                    if (tab.id != activeTabId) {
-                                        val oldBundle = Bundle()
-                                        webView?.saveState(oldBundle)
-                                        tabStates[activeTabId] = oldBundle
-                                        tabVideos[activeTabId] = extractedVideos.toList()
-
-                                        activeTabId = tab.id
-                                    }
-                                },
-                                modifier = Modifier
-                                    .padding(top = 4.dp, bottom = 4.dp, start = 4.dp)
-                                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
-                                    .background(
-                                        if (isActive) MaterialTheme.colorScheme.surface
-                                        else Color.Transparent
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = tab.title,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                             fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.widthIn(max = 100.dp)
-                                    )
-                                    if (tabs.size > 1) {
-                                        IconButton(
-                                            onClick = {
-                                                val idx = tabs.indexOf(tab)
-                                                val closingId = tab.id
-                                                tabStates.remove(closingId)
-                                                tabVideos.remove(closingId)
-                                                tabs.remove(tab)
-                                                if (isActive && tabs.isNotEmpty()) {
-                                                    activeTabId = tabs.getOrNull(idx)?.id ?: tabs.last().id
-                                                }
-                                            },
-                                            modifier = Modifier.size(16.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Close tab",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                modifier = Modifier.size(12.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Add tab button (+) at the end
-                        IconButton(
-                            onClick = {
-                                val oldBundle = Bundle()
-                                webView?.saveState(oldBundle)
-                                tabStates[activeTabId] = oldBundle
-                                tabVideos[activeTabId] = extractedVideos.toList()
-
-                                val nextId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
-                                tabs.add(BrowserTab(nextId, "New Tab", "https://html.duckduckgo.com"))
-                                activeTabId = nextId
-                                extractedVideos.clear()
-                            },
-                            modifier = Modifier
-                                .padding(start = 4.dp, end = 8.dp)
-                                .size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "New Tab",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                Column(modifier = if (isBottom) Modifier.navigationBarsPadding() else Modifier.statusBarsPadding()) {
+                    if (!isBottom) {
+                        tabsRow()
                     }
 
                     // Chrome Address Bar Row
@@ -792,7 +894,8 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.width(4.dp))
                         }
  
-                        // Address / search field container
+                        // Address / search field container with horizontal swipe to switch tabs
+                        var accumulatedDrag by remember { mutableStateOf(0f) }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -808,6 +911,24 @@ class MainActivity : ComponentActivity() {
                                             else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
                                     shape = RoundedCornerShape(22.dp)
                                 )
+                                .pointerInput(tabs.size, activeTabId) {
+                                    detectHorizontalDragGestures(
+                                        onDragStart = { accumulatedDrag = 0f },
+                                        onDragEnd = {
+                                            val threshold = 70f
+                                            val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+                                            if (accumulatedDrag > threshold && currentIdx > 0) {
+                                                switchTab(tabs[currentIdx - 1].id)
+                                            } else if (accumulatedDrag < -threshold && currentIdx >= 0 && currentIdx < tabs.size - 1) {
+                                                switchTab(tabs[currentIdx + 1].id)
+                                            }
+                                            accumulatedDrag = 0f
+                                        },
+                                        onHorizontalDrag = { _, dragAmount ->
+                                            accumulatedDrag += dragAmount
+                                        }
+                                    )
+                                }
                                 .padding(horizontal = 16.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
@@ -850,13 +971,16 @@ class MainActivity : ComponentActivity() {
                                             }
                                         }
                                         
-                                        // Keep Compose state in sync
+                                        // Keep Compose state in sync + Speculative DNS prefetching
                                         editText.addTextChangedListener(object : android.text.TextWatcher {
                                             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                                             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                                                 val currentText = s?.toString() ?: ""
                                                 if (urlTextFieldValue.text != currentText) {
                                                     urlTextFieldValue = urlTextFieldValue.copy(text = currentText)
+                                                    if (currentText.length >= 3 && currentText.contains(".")) {
+                                                        DnsOverHttpsResolver.prefetch(currentText)
+                                                    }
                                                 }
                                             }
                                             override fun afterTextChanged(s: android.text.Editable?) {}
@@ -895,8 +1019,31 @@ class MainActivity : ComponentActivity() {
                         }
                         
                         if (!addressBarFocused) {
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
  
+                            // Chrome-style Tab Counter Button
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)),
+                                color = Color.Transparent,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clickable { showTabSwitcher = true }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "${tabs.size}",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 11.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
                             // Three-dot menu anchor with popover DropdownMenu
                             Box {
                                 IconButton(onClick = { showMoreActionsSheet = true }) {
@@ -995,15 +1142,7 @@ class MainActivity : ComponentActivity() {
                                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                         onClick = {
                                             showMoreActionsSheet = false
-                                            val oldBundle = Bundle()
-                                            webView?.saveState(oldBundle)
-                                            tabStates[activeTabId] = oldBundle
-                                            tabVideos[activeTabId] = extractedVideos.toList()
-
-                                            val nextId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
-                                            tabs.add(BrowserTab(nextId, "New Tab", "https://html.duckduckgo.com"))
-                                            activeTabId = nextId
-                                            extractedVideos.clear()
+                                            createNewTab("https://html.duckduckgo.com")
                                         }
                                     )
 
@@ -1027,6 +1166,28 @@ class MainActivity : ComponentActivity() {
                                             showMoreActionsSheet = false
                                             val intent = Intent(context, HistoryActivity::class.java)
                                             context.startActivity(intent)
+                                        }
+                                    )
+
+                                    // Downloads (opens Download Manager)
+                                    DropdownMenuItem(
+                                        text = { Text("Downloads") },
+                                        leadingIcon = { Icon(DownloadIcon, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            showDownloadsDialog = true
+                                        }
+                                    )
+
+                                    // Tabs Switcher
+                                    DropdownMenuItem(
+                                        text = { Text("Tabs (${tabs.size})") },
+                                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            showTabSwitcher = true
                                         }
                                     )
 
@@ -1107,8 +1268,12 @@ class MainActivity : ComponentActivity() {
                                         }
                                     )
                                 }
+                            }
                         }
                     }
+
+                    if (isBottom) {
+                        tabsRow()
                     }
 
                     // Find in Page Bar
@@ -1137,20 +1302,20 @@ class MainActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.width(8.dp))
                                 BasicTextField(
                                     value = findQuery,
-                                    onValueChange = { newQuery ->
-                                        findQuery = newQuery
-                                        if (newQuery.isEmpty()) {
+                                    onValueChange = { query ->
+                                        findQuery = query
+                                        if (query.isNotEmpty()) {
+                                            webView?.findAllAsync(query)
+                                        } else {
                                             webView?.clearMatches()
                                             findMatchIndex = 0
                                             findMatchTotal = 0
-                                        } else {
-                                            webView?.findAllAsync(newQuery)
                                         }
                                     },
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
                                     singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
                                     modifier = Modifier.weight(1f),
                                     decorationBox = { innerTextField ->
                                         if (findQuery.isEmpty()) {
@@ -1215,106 +1380,120 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        },
-            bottomBar = {
-                // Only the mini-player casting strip lives here
-                val activeDevice = CastSessionManager.castingDevice
-                val activeUrl = CastSessionManager.activeMediaUrl
-                AnimatedVisibility(
-                    visible = activeDevice != null && activeUrl != null,
-                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-                ) {
-                    if (activeDevice != null && activeUrl != null) {
-                        val isAmoled = themeMode == "amoled"
-                        val miniPlayerBg = if (isAmoled) Color(0xFF07050A) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
-                        val miniPlayerContentColor = if (isAmoled) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onPrimaryContainer
-                        val miniPlayerBorder = if (isAmoled) BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)) else null
+        }
 
-                        Surface(
-                            color = miniPlayerBg,
-                            border = miniPlayerBorder,
-                            tonalElevation = 8.dp,
+        val miniPlayerStrip = @Composable {
+            val activeDevice = CastSessionManager.castingDevice
+            val activeUrl = CastSessionManager.activeMediaUrl
+            AnimatedVisibility(
+                visible = activeDevice != null && activeUrl != null,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                if (activeDevice != null && activeUrl != null) {
+                    val isAmoled = themeMode == "amoled"
+                    val miniPlayerBg = if (isAmoled) Color(0xFF07050A) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                    val miniPlayerContentColor = if (isAmoled) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.onPrimaryContainer
+                    val miniPlayerBorder = if (isAmoled) BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)) else null
+
+                    Surface(
+                        color = miniPlayerBg,
+                        border = miniPlayerBorder,
+                        tonalElevation = 8.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = {
+                                    val intent = android.content.Intent(this@MainActivity, CastControlActivity::class.java)
+                                    startActivity(intent)
+                                },
+                                onLongClick = {
+                                    val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    val clip = android.content.ClipData.newPlainText("Cast URL", activeUrl)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(this@MainActivity, "Copied URL to clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .combinedClickable(
-                                    onClick = {
-                                        val intent = android.content.Intent(this@MainActivity, CastControlActivity::class.java)
-                                        startActivity(intent)
-                                    },
-                                    onLongClick = {
-                                        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                        val clip = android.content.ClipData.newPlainText("Cast URL", activeUrl)
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(this@MainActivity, "Copied URL to clipboard", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "Casting",
-                                    tint = miniPlayerContentColor,
-                                    modifier = Modifier.size(22.dp)
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Casting",
+                                tint = miniPlayerContentColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = activeUrl.substringBefore("?").substringAfterLast("/"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    color = miniPlayerContentColor
                                 )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = activeUrl.substringBefore("?").substringAfterLast("/"),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        color = miniPlayerContentColor
-                                    )
-                                    Text(
-                                        text = "▶ ${activeDevice.name}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = miniPlayerContentColor.copy(alpha = 0.7f)
-                                    )
-                                }
-                                IconButton(onClick = {
-                                    lifecycleScope.launch {
-                                        if (CastSessionManager.isMediaPlaying) {
-                                            FCastClient.pause(activeDevice.ipAddress, CastSessionManager.customFcastPort)
-                                            CastSessionManager.isMediaPlaying = false
-                                            CastSessionManager.playbackState = 2
-                                        } else {
-                                            FCastClient.resume(activeDevice.ipAddress, CastSessionManager.customFcastPort)
-                                            CastSessionManager.isMediaPlaying = true
-                                            CastSessionManager.playbackState = 1
-                                        }
-                                    }
-                                }) {
-                                    Icon(
-                                        if (CastSessionManager.isMediaPlaying) PauseIcon else Icons.Default.PlayArrow,
-                                        contentDescription = "Play/Pause",
-                                        tint = miniPlayerContentColor
-                                    )
-                                }
-                                IconButton(onClick = {
-                                    lifecycleScope.launch {
-                                        FCastClient.stop(activeDevice.ipAddress, CastSessionManager.customFcastPort)
-                                        CastSessionManager.castingDevice = null
+                                Text(
+                                    text = "▶ ${activeDevice.name}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = miniPlayerContentColor.copy(alpha = 0.7f)
+                                )
+                            }
+                            IconButton(onClick = {
+                                lifecycleScope.launch {
+                                    if (CastSessionManager.isMediaPlaying) {
+                                        FCastClient.pause(activeDevice.ipAddress, CastSessionManager.customFcastPort)
                                         CastSessionManager.isMediaPlaying = false
-                                        CastSessionManager.activeMediaUrl = null
-                                        CastSessionManager.playbackState = 0
+                                        CastSessionManager.playbackState = 2
+                                    } else {
+                                        FCastClient.resume(activeDevice.ipAddress, CastSessionManager.customFcastPort)
+                                        CastSessionManager.isMediaPlaying = true
+                                        CastSessionManager.playbackState = 1
                                     }
-                                }) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Stop",
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
                                 }
+                            }) {
+                                Icon(
+                                    if (CastSessionManager.isMediaPlaying) PauseIcon else Icons.Default.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = miniPlayerContentColor
+                                )
+                            }
+                            IconButton(onClick = {
+                                lifecycleScope.launch {
+                                    FCastClient.stop(activeDevice.ipAddress, CastSessionManager.customFcastPort)
+                                    CastSessionManager.castingDevice = null
+                                    CastSessionManager.isMediaPlaying = false
+                                    CastSessionManager.activeMediaUrl = null
+                                    CastSessionManager.playbackState = 0
+                                }
+                            }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Stop",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        Scaffold(
+            topBar = {
+                if (!isBottomAddressBar) {
+                    browserControls(false)
+                }
+            },
+            bottomBar = {
+                Column {
+                    miniPlayerStrip()
+                    if (isBottomAddressBar) {
+                        browserControls(true)
                     }
                 }
             },
@@ -1353,7 +1532,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        SecureWebView(ctx).apply {
+                        val wv = SecureWebView(ctx).apply {
                             webView = this
                             webViewClient = MediaExtractorClient(
                                 isAdBlockEnabled = { isAdBlockEnabled },
@@ -1454,8 +1633,24 @@ class MainActivity : ComponentActivity() {
                             }
                             loadUrl(activeTab.url)
                         }
+
+                        SwipeRefreshLayout(ctx).apply {
+                            addView(
+                                wv,
+                                ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                            )
+                            setOnRefreshListener {
+                                wv.reload()
+                            }
+                        }
                     },
-                    update = { view ->
+                    update = { swipeRefresh ->
+                        swipeRefresh.isRefreshing = isLoading
+                        val view = webView ?: return@AndroidView
+
                         if (defaultUserAgent == null) {
                             defaultUserAgent = view.settings.userAgentString
                         }
@@ -1744,6 +1939,328 @@ class MainActivity : ComponentActivity() {
                 shape = RoundedCornerShape(24.dp),
                 containerColor = MaterialTheme.colorScheme.surface
             )
+        }
+
+        // Integrated Media Downloads Dialog
+        if (showDownloadsDialog) {
+            var downloadsList by remember(showDownloadsDialog) {
+                mutableStateOf(DownloadHelper.getDownloads(context))
+            }
+            LaunchedEffect(showDownloadsDialog) {
+                while (showDownloadsDialog) {
+                    delay(1500)
+                    downloadsList = DownloadHelper.getDownloads(context)
+                }
+            }
+            AlertDialog(
+                onDismissRequest = { showDownloadsDialog = false },
+                icon = {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            DownloadIcon,
+                            contentDescription = "Downloads",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                },
+                title = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Downloads (${downloadsList.size})",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                text = {
+                    if (downloadsList.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    DownloadIcon,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.outline,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "No downloads yet",
+                                    color = MaterialTheme.colorScheme.outline,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 400.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(downloadsList) { item ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = item.status == android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                                            DownloadHelper.openDownloadedFile(context, item)
+                                        }
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = item.title,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    DownloadHelper.removeDownload(context, item.id)
+                                                    downloadsList = DownloadHelper.getDownloads(context)
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = "Delete",
+                                                    tint = MaterialTheme.colorScheme.error,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val statusText = when (item.status) {
+                                            android.app.DownloadManager.STATUS_SUCCESSFUL -> "Completed"
+                                            android.app.DownloadManager.STATUS_RUNNING -> "Downloading (${item.progress}%)"
+                                            android.app.DownloadManager.STATUS_PENDING -> "Pending"
+                                            android.app.DownloadManager.STATUS_PAUSED -> "Paused"
+                                            else -> "Failed"
+                                        }
+                                        val statusColor = when (item.status) {
+                                            android.app.DownloadManager.STATUS_SUCCESSFUL -> MaterialTheme.colorScheme.primary
+                                            android.app.DownloadManager.STATUS_RUNNING -> MaterialTheme.colorScheme.tertiary
+                                            else -> MaterialTheme.colorScheme.outline
+                                        }
+                                        Text(
+                                            text = "$statusText • ${DownloadHelper.formatBytes(item.bytesDownloaded)} / ${if (item.totalBytes > 0) DownloadHelper.formatBytes(item.totalBytes) else "Unknown"}",
+                                            fontSize = 12.sp,
+                                            color = statusColor
+                                        )
+                                        if (item.status == android.app.DownloadManager.STATUS_RUNNING && item.progress in 0..100) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            LinearProgressIndicator(
+                                                progress = { item.progress / 100f },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(4.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showDownloadsDialog = false }) { Text("Close") }
+                },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        }
+
+        // Chrome-style Tab Switcher Dialog
+        if (showTabSwitcher) {
+            Dialog(
+                onDismissRequest = { showTabSwitcher = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    Scaffold(
+                        topBar = {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { showTabSwitcher = false }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Close tab switcher")
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "${tabs.size} open ${if (tabs.size == 1) "tab" else "tabs"}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Button(
+                                    onClick = {
+                                        createNewTab("https://html.duckduckgo.com")
+                                        showTabSwitcher = false
+                                    },
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("New Tab")
+                                }
+                            }
+                        }
+                    ) { paddingVals ->
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = paddingVals.calculateTopPadding() + 8.dp,
+                                bottom = 24.dp
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(tabs, key = { it.id }) { tab ->
+                                val isActive = tab.id == activeTabId
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isActive) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                        }
+                                    ),
+                                    border = BorderStroke(
+                                        width = if (isActive) 2.dp else 1.dp,
+                                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(180.dp)
+                                        .clickable {
+                                            switchTab(tab.id)
+                                            showTabSwitcher = false
+                                        }
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(10.dp)
+                                    ) {
+                                        // Header: Title & Close Button
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = tab.title.ifBlank { "New Tab" },
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    closeTab(tab)
+                                                    if (tabs.isEmpty()) {
+                                                        showTabSwitcher = false
+                                                    }
+                                                },
+                                                modifier = Modifier.size(24.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Close Tab",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        }
+                                        
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        
+                                        // Domain URL
+                                        val domain = try {
+                                            val host = Uri.parse(tab.url).host
+                                            host ?: tab.url
+                                        } catch (e: Exception) {
+                                            tab.url
+                                        }
+                                        Text(
+                                            text = domain,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.outline,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        
+                                        // Visual Card Preview Area
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(95.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(
+                                                    TabWindowIcon,
+                                                    contentDescription = null,
+                                                    tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = if (isActive) "Active" else "Tab",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Redesigned Cast Streams Selection Dialog
@@ -2126,6 +2643,31 @@ class MainActivity : ComponentActivity() {
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text("Player", maxLines = 1)
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    val filename = if (video.title.isNotBlank()) video.title else MediaExtractorClient.extractFilenameFromUrl(video.url)
+                                    val finalName = if (filename.contains(".")) filename else "$filename.mp4"
+                                    val cookies = try { CookieManager.getInstance().getCookie(video.url) } catch (e: Exception) { null }
+                                    val ua = webView?.settings?.userAgentString
+                                    val headers = mutableMapOf<String, String>()
+                                    if (!cookies.isNullOrBlank()) headers["Cookie"] = cookies
+                                    if (!ua.isNullOrBlank()) headers["User-Agent"] = ua
+                                    DownloadHelper.enqueueDownload(
+                                        context = context,
+                                        url = video.url,
+                                        suggestedTitle = finalName,
+                                        headers = if (headers.isNotEmpty()) headers else null
+                                    )
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = DownloadIcon,
+                                    contentDescription = "Download Stream",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
 
                             IconButton(

@@ -65,6 +65,12 @@ class SecureWebView @JvmOverloads constructor(
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
         cookieManager.setAcceptThirdPartyCookies(this, false)
+
+        // Process & Memory Management: Bound renderer to reduce OOM crashes when streaming
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            setRendererPriorityPolicy(RENDERER_PRIORITY_BOUND, true)
+        }
+        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
     }
 
     /**

@@ -69,6 +69,7 @@ fun SettingsScreen(
     var isAdBlockEnabled by remember { mutableStateOf(prefs.getBoolean("adblock_enabled", true)) }
     var isPopupsEnabled by remember { mutableStateOf(prefs.getBoolean("popups_enabled", false)) }
     var isDesktopDefault by remember { mutableStateOf(prefs.getBoolean("desktop_mode", false)) }
+    var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", false)) }
     var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
 
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -145,6 +146,19 @@ fun SettingsScreen(
                     onCheckedChange = {
                         isDesktopDefault = it
                         prefs.edit().putBoolean("desktop_mode", it).apply()
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
+                SettingsToggleItem(
+                    title = "Bottom Address Bar",
+                    subtitle = "Move navigation controls and address bar to the bottom for one-handed reach",
+                    icon = Icons.Default.Settings,
+                    checked = isBottomBarEnabled,
+                    onCheckedChange = {
+                        isBottomBarEnabled = it
+                        prefs.edit().putBoolean("bottom_address_bar", it).apply()
                     }
                 )
             }
