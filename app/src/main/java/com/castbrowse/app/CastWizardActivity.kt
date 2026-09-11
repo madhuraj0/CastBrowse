@@ -61,6 +61,7 @@ class CastWizardActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Block screenshots and screen recording on the setup wizard (contains device IP/port info)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        LocalMediaProxy.start()
         discoveryService = SsdpDiscoveryService(this)
 
         val prefs = EncryptedStorage.getPreferences(this)
@@ -207,10 +208,10 @@ class CastWizardActivity : ComponentActivity() {
     private fun playTestStream(device: CastDevice) {
         lifecycleScope.launch {
             CastSessionManager.isCasting = true
-            Toast.makeText(this@CastWizardActivity, "Loading test stream...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@CastWizardActivity, "Connecting to ${device.name}...", Toast.LENGTH_SHORT).show()
             
-            val proxiedUrl = LocalMediaProxy.getProxyUrl(TEST_VIDEO_URL)
-            val res = FCastClient.play(device.ipAddress, proxiedUrl, "FCast Test Stream", CastSessionManager.customFcastPort) {
+            val targetPort = if (device.port > 0) device.port else CastSessionManager.customFcastPort
+            val res = FCastClient.play(device.ipAddress, TEST_VIDEO_URL, "FCast Test Stream", targetPort) {
                 lifecycleScope.launch {
                     CastSessionManager.isMediaPlaying = false
                     CastSessionManager.activeMediaUrl = null
@@ -219,9 +220,12 @@ class CastWizardActivity : ComponentActivity() {
             
             CastSessionManager.isCasting = false
             res.onSuccess {
+                CastSessionManager.castingDevice = device
+                CastSessionManager.customFcastPort = targetPort
                 CastSessionManager.isMediaPlaying = true
                 CastSessionManager.activeMediaUrl = TEST_VIDEO_URL
-                Toast.makeText(this@CastWizardActivity, "Test video playing!", Toast.LENGTH_LONG).show()
+                CastSessionManager.saveRecentIp(this@CastWizardActivity, device.ipAddress)
+                Toast.makeText(this@CastWizardActivity, "Test video playing on ${device.name}!", Toast.LENGTH_LONG).show()
             }.onFailure { e ->
                 Toast.makeText(this@CastWizardActivity, "Test connection failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
             }
@@ -307,7 +311,7 @@ class CastWizardActivity : ComponentActivity() {
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text("Active FCast Connection", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        Text(if (CastSessionManager.isMediaPlaying) "Active FCast Session" else "Selected Receiver", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                         Text(activeDevice.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                         Text("${activeDevice.ipAddress}:${activeDevice.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
@@ -439,7 +443,8 @@ class CastWizardActivity : ComponentActivity() {
                                 .fillMaxWidth()
                                 .clickable {
                                     CastSessionManager.castingDevice = device
-                                    Toast.makeText(context, "Connected to ${device.name}", Toast.LENGTH_SHORT).show()
+                                    CastSessionManager.customFcastPort = device.port
+                                    Toast.makeText(context, "Selected ${device.name}", Toast.LENGTH_SHORT).show()
                                 }
                         ) {
                             Row(
@@ -538,8 +543,9 @@ class CastWizardActivity : ComponentActivity() {
                                                     }
                                                     if (reachable) {
                                                         CastSessionManager.castingDevice = device
+                                                        CastSessionManager.customFcastPort = device.port
                                                         CastSessionManager.saveRecentIp(context, device.ipAddress)
-                                                        Toast.makeText(context, "✓ Connected to ${device.name}", Toast.LENGTH_SHORT).show()
+                                                        Toast.makeText(context, "✓ Selected ${device.name}", Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         Toast.makeText(context, "Cannot reach ${device.ipAddress}:${device.port}", Toast.LENGTH_LONG).show()
                                                     }
@@ -565,11 +571,13 @@ class CastWizardActivity : ComponentActivity() {
                         onClick = {
                             val ip = manualIpText.trim()
                             if (ip.isNotEmpty()) {
-                                val device = CastDevice("Manual Target", ip)
+                                val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
+                                val device = CastDevice("Manual Target", ip, port)
                                 CastSessionManager.castingDevice = device
+                                CastSessionManager.customFcastPort = port
                                 CastSessionManager.saveRecentIp(context, ip)
                                 recentIps = CastSessionManager.getRecentIps(context)
-                                Toast.makeText(context, "Paired receiver: $ip", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Selected receiver: $ip:$port", Toast.LENGTH_SHORT).show()
                             }
                         },
                         shape = RoundedCornerShape(12.dp),

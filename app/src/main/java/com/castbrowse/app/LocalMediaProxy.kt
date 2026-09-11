@@ -36,6 +36,9 @@ object LocalMediaProxy {
     // URL to custom headers map for passing Referer, Cookie, and User-Agent upstream
     private val urlHeadersMap = ConcurrentHashMap<String, Map<String, String>>()
 
+    @Volatile
+    var verifiedLocalIp: String? = null
+
     fun registerUrlHeaders(targetUrl: String, headers: Map<String, String>) {
         urlHeadersMap[targetUrl] = headers
         try {
@@ -51,33 +54,43 @@ object LocalMediaProxy {
         }
     }
 
+    @Synchronized
     fun start() {
-        if (serverSocket != null) return
-        job = CoroutineScope(Dispatchers.IO).launch {
-            try {
-                serverSocket = try {
-                    ServerSocket(DEFAULT_PROXY_PORT)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Default port $DEFAULT_PROXY_PORT busy, binding ephemeral port: ${e.message}")
-                    ServerSocket(0)
-                }
-                proxyPort = serverSocket?.localPort ?: DEFAULT_PROXY_PORT
-                Log.d(TAG, "Proxy server started on port $proxyPort")
-                while (true) {
-                    val socket = serverSocket?.accept() ?: break
+        if (serverSocket != null && serverSocket?.isClosed == false) return
+        try {
+            val ss = try {
+                ServerSocket(DEFAULT_PROXY_PORT)
+            } catch (e: Exception) {
+                Log.w(TAG, "Default port $DEFAULT_PROXY_PORT busy, binding ephemeral port: ${e.message}")
+                ServerSocket(0)
+            }
+            serverSocket = ss
+            proxyPort = ss.localPort
+            Log.d(TAG, "LocalMediaProxy server started on port $proxyPort")
+
+            job?.cancel()
+            job = CoroutineScope(Dispatchers.IO).launch {
+                while (serverSocket != null && serverSocket?.isClosed == false) {
                     try {
-                        socket.tcpNoDelay = true
-                    } catch (e: Exception) {}
-                    launch(Dispatchers.IO) {
-                        handleConnection(socket)
+                        val socket = serverSocket?.accept() ?: break
+                        try {
+                            socket.tcpNoDelay = true
+                        } catch (e: Exception) {}
+                        launch(Dispatchers.IO) {
+                            handleConnection(socket)
+                        }
+                    } catch (e: Exception) {
+                        if (serverSocket?.isClosed == true) break
+                        Log.w(TAG, "LocalMediaProxy accept error: ${e.message}")
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Proxy server error: ${e.message}")
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "LocalMediaProxy start error: ${e.message}")
         }
     }
 
+    @Synchronized
     fun stop() {
         try {
             serverSocket?.close()
@@ -87,45 +100,77 @@ object LocalMediaProxy {
         job = null
         urlHeadersMap.clear()
         lastProxyBaseUrl = null
+        verifiedLocalIp = null
     }
 
-    private fun getLocalIpAddress(): String? {
+    fun getLocalIpAddress(targetReceiverIp: String? = null): String {
+        // 1. If we have a verified local IP from an active socket connection to the receiver
+        verifiedLocalIp?.let { return it }
+
+        // 2. Query kernel routing table via UDP connect to the target receiver (no actual network packets sent)
+        if (!targetReceiverIp.isNullOrEmpty()) {
+            try {
+                java.net.DatagramSocket().use { s ->
+                    s.connect(java.net.InetAddress.getByName(targetReceiverIp), 53)
+                    val addr = s.localAddress?.hostAddress
+                    if (!addr.isNullOrEmpty() && addr != "0.0.0.0" && !addr.startsWith("127.")) {
+                        return addr
+                    }
+                }
+            } catch (e: Exception) {}
+        }
+
+        // 3. Fallback UDP connect to default outbound route
+        try {
+            java.net.DatagramSocket().use { s ->
+                s.connect(java.net.InetAddress.getByName("8.8.8.8"), 53)
+                val addr = s.localAddress?.hostAddress
+                if (!addr.isNullOrEmpty() && addr != "0.0.0.0" && !addr.startsWith("127.")) {
+                    return addr
+                }
+            }
+        } catch (e: Exception) {}
+
+        // 4. Inspect network interfaces prioritizing active Wi-Fi and Ethernet
         try {
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
-            // First pass: Prioritize Wi-Fi and Ethernet interfaces
+            // Pass A: Up and running Wi-Fi / Ethernet interfaces
             for (intf in interfaces) {
+                if (!intf.isUp || intf.isLoopback) continue
                 val name = intf.name.lowercase()
-                if (name.contains("wlan") || name.contains("eth")) {
-                    val addrs = Collections.list(intf.inetAddresses)
-                    for (addr in addrs) {
-                        if (!addr.isLoopbackAddress) {
+                if (name.contains("wlan") || name.contains("eth") || name.contains("en")) {
+                    for (addr in Collections.list(intf.inetAddresses)) {
+                        if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                             val sAddr = addr.hostAddress ?: continue
-                            if (sAddr.indexOf(':') < 0) return sAddr
+                            if (sAddr.isNotEmpty() && !sAddr.startsWith("127.")) return sAddr
                         }
                     }
                 }
             }
-            // Second pass: Fallback to any non-loopback IPv4 address
+            // Pass B: Fallback to any non-cellular IPv4 address
             for (intf in interfaces) {
-                val addrs = Collections.list(intf.inetAddresses)
-                for (addr in addrs) {
-                    if (!addr.isLoopbackAddress) {
+                if (!intf.isUp || intf.isLoopback) continue
+                val name = intf.name.lowercase()
+                if (name.contains("rmnet") || name.contains("ccmni") || name.contains("tun") || name.contains("dummy")) continue
+                for (addr in Collections.list(intf.inetAddresses)) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                         val sAddr = addr.hostAddress ?: continue
-                        if (sAddr.indexOf(':') < 0) return sAddr
+                        if (sAddr.isNotEmpty() && !sAddr.startsWith("127.")) return sAddr
                     }
                 }
             }
         } catch (ex: Exception) {
             Log.e(TAG, "Error getting IP address", ex)
         }
-        return null
+        return "127.0.0.1"
     }
 
-    fun getProxyUrl(targetUrl: String, headers: Map<String, String>? = null): String {
+    fun getProxyUrl(targetUrl: String, headers: Map<String, String>? = null, receiverIp: String? = null): String {
+        start() // Guarantee proxy server is bound and running
         if (headers != null && headers.isNotEmpty()) {
             registerUrlHeaders(targetUrl, headers)
         }
-        val ip = getLocalIpAddress() ?: "127.0.0.1"
+        val ip = getLocalIpAddress(receiverIp)
         val encodedUrl = URLEncoder.encode(targetUrl, "UTF-8")
         return "http://$ip:$proxyPort/proxy?url=$encodedUrl"
     }
@@ -154,12 +199,15 @@ object LocalMediaProxy {
 
             val parts = requestLines.first().split(" ")
             if (parts.size < 2) return
+            val method = parts[0].uppercase()
             val path = parts[1]
             
             val targetUrl = if (path.startsWith("/proxy")) {
                 val urlParamIndex = path.indexOf("url=")
                 if (urlParamIndex == -1) return
-                val decoded = URLDecoder.decode(path.substring(urlParamIndex + 4), "UTF-8")
+                val rawVal = path.substring(urlParamIndex + 4)
+                val encodedUrl = if (rawVal.contains("&")) rawVal.substringBefore("&") else rawVal
+                val decoded = URLDecoder.decode(encodedUrl, "UTF-8")
                 
                 // Extract and store the base URL of this target
                 try {
@@ -201,9 +249,9 @@ object LocalMediaProxy {
             
             while (redirectCount < 5) {
                 val conn = URL(redirectUrl).openConnection() as HttpURLConnection
-                conn.requestMethod = "GET"
+                conn.requestMethod = if (method == "HEAD") "HEAD" else "GET"
                 conn.connectTimeout = 10000
-                conn.readTimeout = 15000
+                conn.readTimeout = 20000
                 conn.instanceFollowRedirects = false
 
                 // Attach registered custom headers (Referer, Cookie, User-Agent) to bypass 403 anti-hotlinking
@@ -290,14 +338,16 @@ object LocalMediaProxy {
             }
             out.write("Connection: close\r\n\r\n".toByteArray())
             
-            val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
-            if (stream != null) {
-                val buffer = ByteArray(16384)
-                var bytesRead: Int
-                while (stream.read(buffer).also { bytesRead = it } != -1) {
-                    out.write(buffer, 0, bytesRead)
+            if (method != "HEAD") {
+                val stream = if (responseCode in 200..299) connection.inputStream else connection.errorStream
+                if (stream != null) {
+                    val buffer = ByteArray(16384)
+                    var bytesRead: Int
+                    while (stream.read(buffer).also { bytesRead = it } != -1) {
+                        out.write(buffer, 0, bytesRead)
+                    }
+                    stream.close()
                 }
-                stream.close()
             }
             out.flush()
         } catch (e: Exception) {

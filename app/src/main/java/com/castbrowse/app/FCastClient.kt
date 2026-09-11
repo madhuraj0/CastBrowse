@@ -37,116 +37,34 @@ object FCastClient {
         onDisconnected: (() -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            // Close any existing session
-            disconnect()
+            // Close any existing session cleanly without triggering disconnection callbacks
+            disconnectInternal()
 
-            Log.d(TAG, "Connecting to $ipAddress:$port")
+            Log.d(TAG, "Connecting to FCast receiver at $ipAddress:$port")
             val socket = Socket()
-            socket.connect(InetSocketAddress(ipAddress, port), 5000)
-            
+            socket.tcpNoDelay = true
+            socket.connect(InetSocketAddress(ipAddress, port), 6000)
+
+            // Cache verified local IP to ensure LocalMediaProxy routes via the correct Wi-Fi interface
+            socket.localAddress?.hostAddress?.let { localIp ->
+                if (localIp.isNotEmpty() && !localIp.startsWith("127.")) {
+                    LocalMediaProxy.verifiedLocalIp = localIp
+                    Log.d(TAG, "FCast: Verified local LAN IP is $localIp")
+                }
+            }
+
             val outputStream = socket.getOutputStream()
             activeSocket = socket
             activeOutputStream = outputStream
 
-            // 1. Send Version message (Opcode 11)
+            // 1. Send Version message (Opcode 11) - announces protocol v3 capability
             val versionJson = buildJsonObject {
                 put("version", 3)
             }.toString()
             writeCommandPacket(outputStream, 11, versionJson)
-            Log.d(TAG, "Sent Version handshake")
+            Log.d(TAG, "FCast: Sent Version message (version: 3)")
 
-            // 2. Send Initial message (Opcode 14)
-            val initialJson = buildJsonObject {
-                put("displayName", "CastBrowse Android")
-                put("appName", "CastBrowse")
-                put("appVersion", "1.3.1")
-            }.toString()
-            writeCommandPacket(outputStream, 14, initialJson)
-            Log.d(TAG, "Sent Initial handshake")
-
-            // Start a reader thread to consume receiver updates, handle Pings and keep connection alive
-            listenJob = CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val inputStream = socket.getInputStream()
-                    val headerBuffer = ByteArray(5)
-                    while (socket.isConnected && !socket.isClosed) {
-                        var offset = 0
-                        while (offset < 5) {
-                            val read = inputStream.read(headerBuffer, offset, 5 - offset)
-                            if (read == -1) throw java.io.EOFException("EOF reading packet header")
-                            offset += read
-                        }
-                        
-                        val size = ((headerBuffer[0].toInt() and 0xFF) or
-                                    ((headerBuffer[1].toInt() and 0xFF) shl 8) or
-                                    ((headerBuffer[2].toInt() and 0xFF) shl 16) or
-                                    ((headerBuffer[3].toInt() and 0xFF) shl 24))
-                        val opcode = headerBuffer[4].toInt() and 0xFF
-                        
-                        val bodySize = size - 1
-                        val bodyStr = if (bodySize > 0) {
-                            val bodyBytes = ByteArray(bodySize)
-                            var bodyOffset = 0
-                            while (bodyOffset < bodySize) {
-                                val read = inputStream.read(bodyBytes, bodyOffset, bodySize - bodyOffset)
-                                if (read == -1) throw java.io.EOFException("EOF reading packet body")
-                                bodyOffset += read
-                            }
-                            String(bodyBytes, Charsets.UTF_8)
-                        } else {
-                            ""
-                        }
-                        
-                        Log.d(TAG, "FCast: Received opcode=$opcode, body='$bodyStr'")
-                        
-                        when (opcode) {
-                            // Ping → Pong
-                            12 -> activeOutputStream?.let { out ->
-                                writeCommandPacket(out, 13)
-                                Log.d(TAG, "FCast: Responded to Ping with Pong")
-                            }
-                            // PlaybackUpdate (6) — receiver pushes current position/state/duration
-                            6 -> try {
-                                val json = org.json.JSONObject(bodyStr)
-                                val state = json.optInt("state", -1)
-                                val time = json.optDouble("time", -1.0)
-                                val duration = json.optDouble("duration", -1.0)
-                                if (state >= 0) {
-                                    CastSessionManager.playbackState = state
-                                    CastSessionManager.isMediaPlaying = state == 1
-                                }
-                                if (time >= 0) {
-                                    CastSessionManager.playbackPositionSeconds = time
-                                }
-                                if (duration >= 0) {
-                                    CastSessionManager.mediaDurationSeconds = duration
-                                }
-                                Log.d(TAG, "FCast: PlaybackUpdate state=$state time=$time duration=$duration")
-                            } catch (e: Exception) {
-                                Log.w(TAG, "FCast: Failed to parse PlaybackUpdate: ${e.message}")
-                            }
-                            // VolumeUpdate (7) — receiver pushes updated volume
-                            7 -> try {
-                                val json = org.json.JSONObject(bodyStr)
-                                val volume = json.optDouble("volume", -1.0)
-                                if (volume >= 0.0) {
-                                    CastSessionManager.volume = volume.toFloat()
-                                    Log.d(TAG, "FCast: VolumeUpdate volume=$volume")
-                                }
-                            } catch (e: Exception) {
-                                Log.w(TAG, "FCast: Failed to parse VolumeUpdate: ${e.message}")
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.d(TAG, "FCast: Reader loop exception: ${e.message}")
-                } finally {
-                    onDisconnected?.invoke()
-                    disconnect()
-                }
-            }
-
-            // 3. Send Play command packet (Opcode 1)
+            // 2. Prepare and send Play message (Opcode 1)
             val container = getContainerType(url) ?: "video/mp4"
             val playJson = buildJsonObject {
                 put("container", container)
@@ -158,24 +76,128 @@ object FCastClient {
                         }
                     }
                 }
-                putJsonObject("metadata") {
-                    put("type", 0) // Generic metadata
-                    put("title", title)
+                if (title.isNotEmpty()) {
+                    putJsonObject("metadata") {
+                        put("type", 0) // Generic metadata (FCast v3)
+                        put("title", title)
+                    }
                 }
             }.toString()
 
             writeCommandPacket(outputStream, 1, playJson)
-            Log.d(TAG, "Sent Play command: $playJson")
+            Log.d(TAG, "FCast: Sent Play command for '$title' ($container)")
 
-            // Optimistically mark as playing immediately
+            // Optimistically update playback state
             CastSessionManager.isMediaPlaying = true
             CastSessionManager.playbackState = 1
             CastSessionManager.playbackPositionSeconds = 0.0
 
+            // 3. Start reader coroutine AFTER Play packet is safely transmitted
+            listenJob = CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val inputStream = socket.getInputStream()
+                    val headerBuffer = ByteArray(5)
+                    while (socket.isConnected && !socket.isClosed) {
+                        var offset = 0
+                        while (offset < 5) {
+                            val read = inputStream.read(headerBuffer, offset, 5 - offset)
+                            if (read == -1) throw java.io.EOFException("Receiver closed connection")
+                            offset += read
+                        }
+
+                        val size = ((headerBuffer[0].toInt() and 0xFF) or
+                                    ((headerBuffer[1].toInt() and 0xFF) shl 8) or
+                                    ((headerBuffer[2].toInt() and 0xFF) shl 16) or
+                                    ((headerBuffer[3].toInt() and 0xFF) shl 24))
+                        val opcode = headerBuffer[4].toInt() and 0xFF
+
+                        val bodySize = size - 1
+                        val bodyStr = if (bodySize > 0) {
+                            val bodyBytes = ByteArray(bodySize)
+                            var bodyOffset = 0
+                            while (bodyOffset < bodySize) {
+                                val read = inputStream.read(bodyBytes, bodyOffset, bodySize - bodyOffset)
+                                if (read == -1) throw java.io.EOFException("Receiver closed connection while reading body")
+                                bodyOffset += read
+                            }
+                            String(bodyBytes, Charsets.UTF_8)
+                        } else {
+                            ""
+                        }
+
+                        Log.d(TAG, "FCast: Received opcode=$opcode, body='$bodyStr'")
+
+                        when (opcode) {
+                            // Ping (12) -> reply with Pong (13)
+                            12 -> activeOutputStream?.let { out ->
+                                writeCommandPacket(out, 13)
+                                Log.d(TAG, "FCast: Responded to Ping with Pong")
+                            }
+                            // Initial (14) -> receiver sent Initial, respond with sender's Initial message
+                            14 -> activeOutputStream?.let { out ->
+                                val initialJson = buildJsonObject {
+                                    put("displayName", "CastBrowse Android")
+                                    put("appName", "CastBrowse")
+                                    put("appVersion", "1.3.2")
+                                }.toString()
+                                writeCommandPacket(out, 14, initialJson)
+                                Log.d(TAG, "FCast: Responded to Initial with sender info")
+                            }
+                            // Version (11) -> receiver announced version, acknowledge if needed
+                            11 -> {
+                                Log.d(TAG, "FCast: Receiver reported version info: $bodyStr")
+                            }
+                            // PlaybackUpdate (6) -> receiver pushes current position/state/duration
+                            6 -> try {
+                                val json = org.json.JSONObject(bodyStr)
+                                val state = json.optInt("state", -1)
+                                val time = json.optDouble("time", -1.0)
+                                val duration = json.optDouble("duration", -1.0)
+                                if (state >= 0) {
+                                    CastSessionManager.playbackState = state
+                                    CastSessionManager.isMediaPlaying = (state == 1)
+                                }
+                                if (time >= 0.0) {
+                                    CastSessionManager.playbackPositionSeconds = time
+                                }
+                                if (duration >= 0.0) {
+                                    CastSessionManager.mediaDurationSeconds = duration
+                                }
+                                Log.d(TAG, "FCast: PlaybackUpdate state=$state time=$time duration=$duration")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "FCast: Failed to parse PlaybackUpdate: ${e.message}")
+                            }
+                            // VolumeUpdate (7) -> receiver pushes updated volume
+                            7 -> try {
+                                val json = org.json.JSONObject(bodyStr)
+                                val volume = json.optDouble("volume", -1.0)
+                                if (volume >= 0.0) {
+                                    CastSessionManager.volume = volume.toFloat()
+                                    Log.d(TAG, "FCast: VolumeUpdate volume=$volume")
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "FCast: Failed to parse VolumeUpdate: ${e.message}")
+                            }
+                            // PlaybackError (9) -> receiver encountered an error loading/playing media
+                            9 -> {
+                                Log.w(TAG, "FCast: Receiver reported PlaybackError: $bodyStr")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "FCast: Reader loop ended: ${e.message}")
+                } finally {
+                    if (activeSocket == socket) {
+                        onDisconnected?.invoke()
+                        disconnectInternal()
+                    }
+                }
+            }
+
             Unit
         }.onFailure { e ->
             Log.e(TAG, "FCast play failed to connect/write to $ipAddress:$port", e)
-            disconnect()
+            disconnectInternal()
         }
     }
 
@@ -233,6 +255,10 @@ object FCastClient {
     }
 
     fun disconnect() {
+        disconnectInternal()
+    }
+
+    private fun disconnectInternal() {
         try {
             listenJob?.cancel()
         } catch (e: Exception) {}
@@ -282,19 +308,13 @@ object FCastClient {
     private fun writeOneShot(ipAddress: String, opcode: Int, jsonPayload: String, port: Int): Result<Unit> {
         return runCatching {
             Socket().use { socket ->
+                socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(ipAddress, port), 4000)
                 val out = socket.getOutputStream()
                 
-                // One-shot connection also requires version and initial exchange
+                // One-shot connection announces version 3
                 val versionJson = buildJsonObject { put("version", 3) }.toString()
                 writeCommandPacket(out, 11, versionJson)
-                
-                val initialJson = buildJsonObject {
-                    put("displayName", "CastBrowse Android")
-                    put("appName", "CastBrowse")
-                    put("appVersion", "1.3.1")
-                }.toString()
-                writeCommandPacket(out, 14, initialJson)
                 
                 writeCommandPacket(out, opcode, jsonPayload)
             }

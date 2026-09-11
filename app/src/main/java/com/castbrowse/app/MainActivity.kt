@@ -635,6 +635,7 @@ class MainActivity : ComponentActivity() {
     private fun castToDevice(device: CastDevice, videoUrl: String, videoTitle: String, customFCastPort: Int) {
         lifecycleScope.launch {
             CastSessionManager.isCasting = true
+            val targetPort = if (device.port > 0) device.port else customFCastPort
             Toast.makeText(this@MainActivity, "Connecting to ${device.name}...", Toast.LENGTH_SHORT).show()
 
             val headers = mutableMapOf<String, String>()
@@ -645,20 +646,25 @@ class MainActivity : ComponentActivity() {
             if (!activeTabUrl.isNullOrEmpty()) {
                 headers["Referer"] = activeTabUrl
             }
-            val cookies = android.webkit.CookieManager.getInstance().getCookie(videoUrl)
+            val cookies = try { android.webkit.CookieManager.getInstance().getCookie(videoUrl) } catch (e: Exception) { null }
             if (!cookies.isNullOrEmpty()) {
                 headers["Cookie"] = cookies
             }
 
-            val proxiedUrl = LocalMediaProxy.getProxyUrl(videoUrl, headers)
-            android.util.Log.d("MainActivity", "Proxying URL: $videoUrl -> $proxiedUrl")
+            val hasHeaders = !cookies.isNullOrEmpty() || (!activeTabUrl.isNullOrEmpty() && (videoUrl.contains(".m3u8") || videoUrl.contains(".mpd")))
+            val proxiedUrl = if (hasHeaders) {
+                LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
+            } else {
+                videoUrl
+            }
+            android.util.Log.d("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort -> $proxiedUrl")
             val cleanTitle = videoTitle.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(videoUrl) }
             val result = FCastClient.play(
                 ipAddress = device.ipAddress,
                 url = proxiedUrl,
                 title = cleanTitle,
-                port = customFCastPort,
-                headers = headers
+                port = targetPort,
+                headers = if (proxiedUrl != videoUrl) null else headers
             ) {
                 lifecycleScope.launch {
                     CastPlaybackService.stop(this@MainActivity)
@@ -674,6 +680,7 @@ class MainActivity : ComponentActivity() {
                 CastSessionManager.activeMediaUrl = videoUrl
                 CastSessionManager.activeMediaTitle = cleanTitle
                 CastSessionManager.castingDevice = device
+                CastSessionManager.customFcastPort = targetPort
 
                 // Keep screen-lock background casting alive via Foreground Service + WakeLock
                 CastPlaybackService.start(
@@ -681,7 +688,7 @@ class MainActivity : ComponentActivity() {
                     title = cleanTitle,
                     deviceName = device.name,
                     ip = device.ipAddress,
-                    port = customFCastPort,
+                    port = targetPort,
                     url = proxiedUrl
                 )
 
@@ -2452,7 +2459,8 @@ class MainActivity : ComponentActivity() {
                                     Button(
                                         onClick = {
                                             selectedVideoToCast?.let { video ->
-                                                castToDevice(activeDevice, video.url, video.title, CastSessionManager.customFcastPort)
+                                                val portToUse = if (activeDevice.port > 0) activeDevice.port else CastSessionManager.customFcastPort
+                                                castToDevice(activeDevice, video.url, video.title, portToUse)
                                             }
                                         },
                                         enabled = selectedVideoToCast != null,

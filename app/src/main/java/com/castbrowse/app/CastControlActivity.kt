@@ -83,6 +83,7 @@ class CastControlActivity : ComponentActivity() {
     @Composable
     fun ControlScreen() {
         val activeDevice = CastSessionManager.castingDevice
+        val targetPort = if ((activeDevice?.port ?: 0) > 0) activeDevice!!.port else CastSessionManager.customFcastPort
 
         Scaffold(
             topBar = {
@@ -325,7 +326,7 @@ class CastControlActivity : ComponentActivity() {
                                     FCastClient.seek(
                                         activeDevice.ipAddress,
                                         sliderValue.toDouble(),
-                                        CastSessionManager.customFcastPort
+                                        targetPort
                                     )
                                 }
                             },
@@ -347,7 +348,7 @@ class CastControlActivity : ComponentActivity() {
                                     FCastClient.seek(
                                         activeDevice.ipAddress,
                                         localOffsetSeconds.toDouble(),
-                                        CastSessionManager.customFcastPort
+                                        targetPort
                                     )
                                 }
                             },
@@ -362,7 +363,7 @@ class CastControlActivity : ComponentActivity() {
 
                         FilledIconButton(
                             onClick = {
-                                val port = CastSessionManager.customFcastPort
+                                val port = targetPort
                                 lifecycleScope.launch {
                                     if (isTimerActive) {
                                         FCastClient.pause(activeDevice.ipAddress, port)
@@ -394,7 +395,7 @@ class CastControlActivity : ComponentActivity() {
                                     FCastClient.seek(
                                         activeDevice.ipAddress,
                                         localOffsetSeconds.toDouble(),
-                                        CastSessionManager.customFcastPort
+                                        targetPort
                                     )
                                 }
                             },
@@ -434,7 +435,7 @@ class CastControlActivity : ComponentActivity() {
                                         FCastClient.setVolume(
                                             activeDevice.ipAddress,
                                             volumeState / 100f,
-                                            CastSessionManager.customFcastPort
+                                            targetPort
                                         )
                                     }
                                 },
@@ -500,7 +501,7 @@ class CastControlActivity : ComponentActivity() {
                                                 FCastClient.setSpeed(
                                                     activeDevice.ipAddress,
                                                     speed.toDouble(),
-                                                    CastSessionManager.customFcastPort
+                                                    targetPort
                                                 )
                                             }
                                         }
@@ -525,7 +526,7 @@ class CastControlActivity : ComponentActivity() {
                         onClick = {
                             lifecycleScope.launch {
                                 CastPlaybackService.stop(this@CastControlActivity)
-                                FCastClient.stop(activeDevice.ipAddress, CastSessionManager.customFcastPort)
+                                FCastClient.stop(activeDevice.ipAddress, targetPort)
                                 CastSessionManager.isMediaPlaying = false
                                 CastSessionManager.activeMediaUrl = null
                                 CastSessionManager.activeMediaTitle = null
