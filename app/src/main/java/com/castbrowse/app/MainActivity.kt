@@ -232,6 +232,147 @@ private val ShareIcon: ImageVector by lazy {
     }.build()
 }
 
+// Inline Lock icon for Page Info security dialog
+private val LockIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(18f, 8f)
+        horizontalLineTo(17f)
+        verticalLineTo(6f)
+        curveTo(17f, 3.24f, 14.76f, 1f, 12f, 1f)
+        curveTo(9.24f, 1f, 7f, 3.24f, 7f, 6f)
+        verticalLineTo(8f)
+        horizontalLineTo(6f)
+        curveTo(4.9f, 8f, 4f, 8.9f, 4f, 10f)
+        verticalLineTo(20f)
+        curveTo(4f, 21.1f, 4.9f, 22f, 6f, 22f)
+        horizontalLineTo(18f)
+        curveTo(19.1f, 22f, 20f, 21.1f, 20f, 20f)
+        verticalLineTo(10f)
+        curveTo(20f, 8.9f, 19.1f, 8f, 18f, 8f)
+        close()
+        moveTo(12f, 17f)
+        curveTo(10.9f, 17f, 10f, 16.1f, 10f, 15f)
+        curveTo(10f, 13.9f, 10.9f, 13f, 12f, 13f)
+        curveTo(13.1f, 13f, 14f, 13.9f, 14f, 15f)
+        curveTo(14f, 16.1f, 13.1f, 17f, 12f, 17f)
+        close()
+        moveTo(15.1f, 8f)
+        horizontalLineTo(8.9f)
+        verticalLineTo(6f)
+        curveTo(8.9f, 4.29f, 10.29f, 2.9f, 12f, 2.9f)
+        curveTo(13.71f, 2.9f, 15.1f, 4.29f, 15.1f, 6f)
+        verticalLineTo(8f)
+        close()
+    }.build()
+}
+
+data class BookmarkItem(
+    val url: String,
+    val title: String,
+    val timestamp: Long
+)
+
+@Composable
+private fun NavCircleButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean = true,
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+        shadowElevation = 2.dp,
+        modifier = Modifier.size(38.dp)
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(19.dp),
+                tint = if (enabled) tint else tint.copy(alpha = 0.35f)
+            )
+        }
+    }
+}
+
+private fun isUrlBookmarked(context: Context, url: String): Boolean {
+    if (url.isBlank()) return false
+    val prefs = EncryptedStorage.getPreferences(context)
+    val raw = prefs.getString("bookmarks_json", "[]") ?: "[]"
+    val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+    for (i in 0 until arr.length()) {
+        if (arr.getJSONObject(i).optString("url") == url) return true
+    }
+    return false
+}
+
+private fun toggleBookmark(context: Context, url: String, title: String): Boolean {
+    if (url.isBlank()) return false
+    val prefs = EncryptedStorage.getPreferences(context)
+    val raw = prefs.getString("bookmarks_json", "[]") ?: "[]"
+    val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+    var foundIndex = -1
+    for (i in 0 until arr.length()) {
+        if (arr.getJSONObject(i).optString("url") == url) {
+            foundIndex = i
+            break
+        }
+    }
+    val newArr = org.json.JSONArray()
+    val isNowBookmarked: Boolean
+    if (foundIndex != -1) {
+        for (i in 0 until arr.length()) {
+            if (i != foundIndex) newArr.put(arr.getJSONObject(i))
+        }
+        isNowBookmarked = false
+        Toast.makeText(context, "Bookmark removed", Toast.LENGTH_SHORT).show()
+    } else {
+        val entry = org.json.JSONObject().apply {
+            put("url", url)
+            put("title", title.ifBlank { url })
+            put("ts", System.currentTimeMillis())
+        }
+        newArr.put(entry)
+        for (i in 0 until arr.length()) newArr.put(arr.getJSONObject(i))
+        isNowBookmarked = true
+        Toast.makeText(context, "Bookmark added", Toast.LENGTH_SHORT).show()
+    }
+    prefs.edit().putString("bookmarks_json", newArr.toString()).apply()
+    return isNowBookmarked
+}
+
+private fun loadBookmarks(prefs: android.content.SharedPreferences): List<BookmarkItem> {
+    val raw = prefs.getString("bookmarks_json", "[]") ?: "[]"
+    val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
+    val result = mutableListOf<BookmarkItem>()
+    for (i in 0 until arr.length()) {
+        try {
+            val obj = arr.getJSONObject(i)
+            result.add(
+                BookmarkItem(
+                    url = obj.getString("url"),
+                    title = obj.optString("title", ""),
+                    timestamp = obj.optLong("ts", 0L)
+                )
+            )
+        } catch (e: Exception) {}
+    }
+    return result
+}
+
 class MainActivity : ComponentActivity() {
 
     private var webView: SecureWebView? = null
@@ -291,6 +432,20 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+        if (intent.getBooleanExtra("EXTRA_PANIC_WIPE", false)) {
+            triggerPanicWipe()
+            return
+        }
+        val extraUrl = intent.getStringExtra("EXTRA_LOAD_URL")
+        if (!extraUrl.isNullOrEmpty()) {
+            handleUrlInput(extraUrl)
+            return
+        }
+        val dataUri = intent.data
+        if (dataUri != null) {
+            handleUrlInput(dataUri.toString())
+            return
+        }
         val action = intent.action
         val type = intent.type
         if (Intent.ACTION_SEND == action && type != null) {
@@ -476,9 +631,8 @@ class MainActivity : ComponentActivity() {
         }
 
         var showMoreActionsSheet by remember { mutableStateOf(false) }
-        var showThemeDialog by remember { mutableStateOf(false) }
-        var showCreditsDialog by remember { mutableStateOf(false) }
-        var showHistoryDialog by remember { mutableStateOf(false) }
+        var showPageInfoDialog by remember { mutableStateOf(false) }
+        var showBookmarksDialog by remember { mutableStateOf(false) }
         var detailedVideoForDialog by remember { mutableStateOf<ExtractedVideo?>(null) }
         val prefs = remember { EncryptedStorage.getPreferences(context) }
         var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
@@ -762,261 +916,197 @@ class MainActivity : ComponentActivity() {
                                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
                                         .padding(vertical = 8.dp)
                                 ) {
-                                // 1. NavigationControls (Chrome-style comfortable row)
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceEvenly,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            IconButton(
-                                                onClick = { webView?.let { if (it.canGoBack()) it.goBack() }; showMoreActionsSheet = false },
-                                                enabled = webView?.canGoBack() == true,
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                    contentDescription = "Back",
-                                                    modifier = Modifier.size(20.dp),
-                                                    tint = if (webView?.canGoBack() == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                                )
-                                            }
-                                            IconButton(
-                                                onClick = { webView?.reload(); showMoreActionsSheet = false },
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Refresh,
-                                                    contentDescription = "Reload",
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            }
-                                            IconButton(
-                                                onClick = { webView?.let { if (it.canGoForward()) it.goForward() }; showMoreActionsSheet = false },
-                                                enabled = webView?.canGoForward() == true,
-                                                modifier = Modifier.size(40.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                                    contentDescription = "Forward",
-                                                    modifier = Modifier.size(20.dp),
-                                                    tint = if (webView?.canGoForward() == true) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {}
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-                                
-                                // 2. Adblock Shield
-                                DropdownMenuItem(
-                                    text = { Text("Adblock Shield") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = if (isAdBlockEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Switch(
-                                            checked = isAdBlockEnabled,
-                                            onCheckedChange = { isAdBlockEnabled = it },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                                    onClick = { isAdBlockEnabled = !isAdBlockEnabled }
-                                )
+                                    // 1. Chrome-Style Navigation Controls Panel (with tactile Round Depth Effect)
+                                    val currentUrl = activeTab.url
+                                    var isBookmarked by remember(currentUrl, showMoreActionsSheet) {
+                                        mutableStateOf(isUrlBookmarked(context, currentUrl))
+                                    }
 
-                                // 3. Allow Popups
-                                DropdownMenuItem(
-                                    text = { Text("Allow Popups") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Share,
-                                            contentDescription = null,
-                                            tint = if (isPopupsEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Switch(
-                                            checked = isPopupsEnabled,
-                                            onCheckedChange = { isPopupsEnabled = it },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                                    onClick = { isPopupsEnabled = !isPopupsEnabled }
-                                )
-
-                                // 4. Desktop Site
-                                DropdownMenuItem(
-                                    text = { Text("Desktop Site") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Settings,
-                                            contentDescription = null,
-                                            tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Switch(
-                                            checked = isDesktopMode,
-                                            onCheckedChange = { 
-                                                isDesktopMode = it
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Back
+                                        NavCircleButton(
+                                            icon = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back",
+                                            enabled = webView?.canGoBack() == true,
+                                            onClick = {
+                                                webView?.let { if (it.canGoBack()) it.goBack() }
                                                 showMoreActionsSheet = false
-                                            },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                                    onClick = { 
-                                        isDesktopMode = !isDesktopMode
-                                        showMoreActionsSheet = false
-                                    }
-                                )
-
-                                // 4a. Find in Page
-                                DropdownMenuItem(
-                                    text = { Text("Find in Page") },
-                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        showFindInPage = true
-                                    }
-                                )
-
-                                // 4b. View History
-                                DropdownMenuItem(
-                                    text = { Text("View History") },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        showHistoryDialog = true
-                                    }
-                                )
-
-                                // 4c. Record History
-                                DropdownMenuItem(
-                                    text = { Text("Record History") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.Refresh,
-                                            contentDescription = null,
-                                            tint = if (isHistoryEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    trailingIcon = {
-                                        Switch(
-                                            checked = isHistoryEnabled,
-                                            onCheckedChange = { 
-                                                isHistoryEnabled = it
-                                                prefs.edit().putBoolean("history_enabled", it).apply()
-                                            },
-                                            modifier = Modifier.scale(0.8f)
-                                        )
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
-                                    onClick = { 
-                                        isHistoryEnabled = !isHistoryEnabled
-                                        prefs.edit().putBoolean("history_enabled", isHistoryEnabled).apply()
-                                    }
-                                )
-
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-
-                                // Theme selector
-                                DropdownMenuItem(
-                                    text = { Text("Theme") },
-                                    leadingIcon = { Icon(ThemeIcon, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        showThemeDialog = true
-                                    }
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-
-                                // 7. Credits & Privacy
-                                DropdownMenuItem(
-                                    text = { Text("Credits & Privacy") },
-                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        showCreditsDialog = true
-                                    }
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-
-                                // 7.5. Update Adblock List
-                                DropdownMenuItem(
-                                    text = { Text("Update Adblock List") },
-                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        android.widget.Toast.makeText(context, "Updating adblock list...", android.widget.Toast.LENGTH_SHORT).show()
-                                        MediaExtractorClient.updateAdHosts(context) { success, count ->
-                                            if (success) {
-                                                android.widget.Toast.makeText(context, "Adblock list updated! $count hosts loaded.", android.widget.Toast.LENGTH_LONG).show()
-                                            } else {
-                                                android.widget.Toast.makeText(context, "Failed to update adblock list.", android.widget.Toast.LENGTH_SHORT).show()
                                             }
-                                        }
-                                    }
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-
-                                // 5. Setup Wizard
-                                DropdownMenuItem(
-                                    text = { Text("Setup Wizard") },
-                                    leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        val intent = android.content.Intent(context, CastWizardActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                )
-
-                                // 6. Cast Control Panel
-                                val activeDeviceInMenu = CastSessionManager.castingDevice
-                                DropdownMenuItem(
-                                    text = { Text("Cast Control Panel") },
-                                    leadingIcon = {
-                                        Icon(
-                                            Icons.Default.PlayArrow,
-                                            contentDescription = null,
-                                            tint = if (activeDeviceInMenu != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                    },
-                                    enabled = activeDeviceInMenu != null,
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        val intent = android.content.Intent(context, CastControlActivity::class.java)
-                                        context.startActivity(intent)
-                                    }
-                                )
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
-                                // 8. Clear Session
-                                DropdownMenuItem(
-                                    text = { Text("Clear Session", color = MaterialTheme.colorScheme.error) },
-                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                                    onClick = {
-                                        showMoreActionsSheet = false
-                                        triggerPanicWipe()
+                                        // Forward
+                                        NavCircleButton(
+                                            icon = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = "Forward",
+                                            enabled = webView?.canGoForward() == true,
+                                            onClick = {
+                                                webView?.let { if (it.canGoForward()) it.goForward() }
+                                                showMoreActionsSheet = false
+                                            }
+                                        )
+
+                                        // Bookmark
+                                        NavCircleButton(
+                                            icon = Icons.Default.Star,
+                                            contentDescription = "Bookmark",
+                                            tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            onClick = {
+                                                isBookmarked = toggleBookmark(context, currentUrl, activeTab.title)
+                                            }
+                                        )
+
+                                        // Information
+                                        NavCircleButton(
+                                            icon = Icons.Default.Info,
+                                            contentDescription = "Page info",
+                                            onClick = {
+                                                showMoreActionsSheet = false
+                                                showPageInfoDialog = true
+                                            }
+                                        )
+
+                                        // Reload
+                                        NavCircleButton(
+                                            icon = Icons.Default.Refresh,
+                                            contentDescription = "Reload",
+                                            onClick = {
+                                                webView?.reload()
+                                                showMoreActionsSheet = false
+                                            }
+                                        )
                                     }
-                                )
-                            }
+
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                                        thickness = 0.5.dp,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+
+                                    // New Tab
+                                    DropdownMenuItem(
+                                        text = { Text("New Tab") },
+                                        leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            val oldBundle = Bundle()
+                                            webView?.saveState(oldBundle)
+                                            tabStates[activeTabId] = oldBundle
+                                            tabVideos[activeTabId] = extractedVideos.toList()
+
+                                            val nextId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
+                                            tabs.add(BrowserTab(nextId, "New Tab", "https://html.duckduckgo.com"))
+                                            activeTabId = nextId
+                                            extractedVideos.clear()
+                                        }
+                                    )
+
+                                    // Bookmarks
+                                    DropdownMenuItem(
+                                        text = { Text("Bookmarks") },
+                                        leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            showBookmarksDialog = true
+                                        }
+                                    )
+
+                                    // History (opens full HistoryActivity)
+                                    DropdownMenuItem(
+                                        text = { Text("History") },
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            val intent = Intent(context, HistoryActivity::class.java)
+                                            context.startActivity(intent)
+                                        }
+                                    )
+
+                                    // Find in Page
+                                    DropdownMenuItem(
+                                        text = { Text("Find in Page") },
+                                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            showFindInPage = true
+                                        }
+                                    )
+
+                                    // Desktop Site toggle
+                                    DropdownMenuItem(
+                                        text = { Text("Desktop Site") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Settings,
+                                                contentDescription = null,
+                                                tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        },
+                                        trailingIcon = {
+                                            Switch(
+                                                checked = isDesktopMode,
+                                                onCheckedChange = {
+                                                    isDesktopMode = it
+                                                    showMoreActionsSheet = false
+                                                },
+                                                modifier = Modifier.scale(0.8f)
+                                            )
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                                        onClick = {
+                                            isDesktopMode = !isDesktopMode
+                                            showMoreActionsSheet = false
+                                        }
+                                    )
+
+                                    // Cast Control Panel (if device connected)
+                                    val activeDeviceInMenu = CastSessionManager.castingDevice
+                                    if (activeDeviceInMenu != null) {
+                                        DropdownMenuItem(
+                                            text = { Text("Cast Control Panel") },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            },
+                                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                            onClick = {
+                                                showMoreActionsSheet = false
+                                                val intent = Intent(context, CastControlActivity::class.java)
+                                                context.startActivity(intent)
+                                            }
+                                        )
+                                    }
+
+                                    HorizontalDivider(
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                                        thickness = 0.5.dp,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+
+                                    // Settings (opens full SettingsActivity)
+                                    DropdownMenuItem(
+                                        text = { Text("Settings") },
+                                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            val intent = Intent(context, SettingsActivity::class.java)
+                                            context.startActivity(intent)
+                                        }
+                                    )
+                                }
                         }
                     }
                     }
@@ -1420,84 +1510,123 @@ class MainActivity : ComponentActivity() {
 
 
 
-        // Theme selection dialog
-        if (showThemeDialog) {
-            Dialog(onDismissRequest = { showThemeDialog = false }) {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                    modifier = Modifier.width(280.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+        // Chrome-style Page Info Dialog
+        if (showPageInfoDialog) {
+            val uri = try { android.net.Uri.parse(activeTab.url) } catch (e: Exception) { null }
+            val isHttps = uri?.scheme.equals("https", ignoreCase = true)
+            val hostDisplay = uri?.host ?: activeTab.url
+
+            AlertDialog(
+                onDismissRequest = { showPageInfoDialog = false },
+                icon = {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isHttps) Color(0xFF2E7D32).copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                        modifier = Modifier.size(48.dp)
                     ) {
-                        Text(
-                            "Choose Theme",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        listOf(
-                            "light" to "Light",
-                            "dark" to "Dark",
-                            "amoled" to "AMOLED Black",
-                            "system" to "System Default",
-                            "dynamic" to "Material You"
-                        ).forEach { (mode, label) ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        onThemeModeChange(mode)
-                                        showThemeDialog = false
-                                    }
-                                    .padding(vertical = 8.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = themeMode == mode,
-                                    onClick = {
-                                        onThemeModeChange(mode)
-                                        showThemeDialog = false
-                                    },
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Text(label, style = MaterialTheme.typography.bodyMedium)
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isHttps) LockIcon else Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = if (isHttps) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
                         }
                     }
-                }
-            }
-        }
-
-        // About & Credits dialog
-        if (showCreditsDialog) {
-            AlertDialog(
-                onDismissRequest = { showCreditsDialog = false },
-                title = { Text("About & Privacy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                },
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            "How it works:\nExtracts HTML5 video URLs from pages and streams them to your FCast receiver (e.g. Android TV).",
-                            style = MaterialTheme.typography.bodyMedium
+                            text = hostDisplay,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            "Privacy:\nOperates 100% locally. Session cookies/headers are proxied purely for video authorization. No tracking, no external collection.",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            "Credits:\n• FCast protocol & client\n• Steven Black's Adblock Hosts\n• Kotlin Coroutines\n• Jetpack Compose\n• OkHttp & SSDP Discovery\n\nCollaborators:\n• madhuraj0 (Idea, Design direction, Testing)\n• Antigravity (AI Assistant)",
-                            style = MaterialTheme.typography.bodyMedium
+                            text = if (isHttps) "Connection is secure" else "Connection is not secure",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isHttps) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
                         )
                     }
                 },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (isHttps) 
+                                        "Your information (for example, passwords or cookies) is private and encrypted when sent to this site."
+                                    else 
+                                        "You should not enter any sensitive information on this site, because it could be seen by attackers.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        // Protections info card
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("• Adblock Shield: Active", style = MaterialTheme.typography.labelMedium)
+                                Text("• Detected Streams: ${extractedVideos.size}", style = MaterialTheme.typography.labelMedium)
+                                Text("• Anti-Hotlink Proxy: 127.0.0.1:8888", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+
+                        // Copy / Share actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    val clip = android.content.ClipData.newPlainText("URL", activeTab.url)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(this@MainActivity, "URL copied to clipboard", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(CopyIcon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Copy", style = MaterialTheme.typography.labelMedium)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, activeTab.url)
+                                    }
+                                    startActivity(Intent.createChooser(shareIntent, "Share link"))
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(ShareIcon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Share", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                },
                 confirmButton = {
-                    TextButton(onClick = { showCreditsDialog = false }) {
-                        Text("Dismiss")
+                    TextButton(onClick = { showPageInfoDialog = false }) {
+                        Text("Done")
                     }
                 },
                 shape = RoundedCornerShape(24.dp),
@@ -1505,45 +1634,38 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        // History Dialog
-        if (showHistoryDialog) {
-            val historyEntries = remember(showHistoryDialog) {
-                val raw = prefs.getString("history_json", "[]") ?: "[]"
-                val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
-                (0 until arr.length()).map { i ->
-                    val obj = arr.getJSONObject(i)
-                    Pair(obj.getString("url"), obj.getLong("ts"))
-                }
+        // Bookmarks Dialog
+        if (showBookmarksDialog) {
+            var bookmarksList by remember(showBookmarksDialog) {
+                mutableStateOf(loadBookmarks(prefs))
             }
-            var historyList by remember { mutableStateOf(historyEntries) }
 
             AlertDialog(
-                onDismissRequest = { showHistoryDialog = false },
+                onDismissRequest = { showBookmarksDialog = false },
                 title = {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        if (historyList.isNotEmpty()) {
-                            TextButton(onClick = {
-                                prefs.edit().putString("history_json", "[]").apply()
-                                historyList = emptyList()
-                            }) {
-                                Text("Clear All", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
+                        Text("Bookmarks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${bookmarksList.size}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 },
                 text = {
-                    if (historyList.isEmpty()) {
+                    if (bookmarksList.isEmpty()) {
                         Box(
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "No history yet. Enable \"Record History\" in the menu.",
+                                "No bookmarks saved yet.\nTap the star in the menu to bookmark any page.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -1551,36 +1673,65 @@ class MainActivity : ComponentActivity() {
                         }
                     } else {
                         LazyColumn(
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 380.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            items(historyList) { (url, ts) ->
-                                val dateStr = remember(ts) {
-                                    java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
-                                }
+                            items(bookmarksList, key = { it.url }) { bookmark ->
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(12.dp))
                                         .clickable {
-                                            showHistoryDialog = false
-                                            webView?.loadUrl(url)
+                                            showBookmarksDialog = false
+                                            handleUrlInput(bookmark.url)
                                         },
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                                 ) {
-                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                        Text(
-                                            text = url,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = MaterialTheme.colorScheme.primary
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
                                         )
-                                        Text(
-                                            text = dateStr,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = bookmark.title.ifBlank { bookmark.url },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = bookmark.url,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                toggleBookmark(context, bookmark.url, bookmark.title)
+                                                bookmarksList = loadBookmarks(prefs)
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "Delete bookmark",
+                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1588,7 +1739,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showHistoryDialog = false }) { Text("Close") }
+                    TextButton(onClick = { showBookmarksDialog = false }) { Text("Close") }
                 },
                 shape = RoundedCornerShape(24.dp),
                 containerColor = MaterialTheme.colorScheme.surface

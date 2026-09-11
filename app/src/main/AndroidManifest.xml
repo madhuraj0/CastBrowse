@@ -50,6 +50,18 @@
             android:configChanges="orientation|screenSize"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
         <service
             android:name=".CastPlaybackService"
             android:exported="false"
