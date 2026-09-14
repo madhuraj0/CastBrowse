@@ -48,6 +48,9 @@ This document outlines the planned architectural milestones, system features, an
 ---
 
 ### 5. UI/UX Polish & Design Consistency
+- **Fix Bottom Navigation Bar Clipping**: Resolve navigation bar content clipping by accommodating Android system gesture/3-button insets (`windowInsets` / `navigationBarsPadding()`) and standard Material 3 navigation bar heights.
+- **Desktop Site Overflow Icon**: Replace the generic `Settings` icon in the 3-dot overflow menu for "Desktop Site" with a dedicated desktop/computer monitor vector icon.
+- **Individual Stream & Device Video Dismissal**: Provide an individual delete/dismiss action on each card in both Web Streams and Device Videos to allow removing single items from the list without needing a full "Clear All".
 - **Design Language System**: Harmonize typography, border radii, tactile pressed states, haptic feedback, and dynamic color/AMOLED dark themes across all activities and dialogs.
 - **Responsive Tablet & Foldable Layout**: Split-screen two-pane layout for tablets, foldables, and Chromebooks (browser on left, streams list on right).
 
