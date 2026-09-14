@@ -1,69 +1,37 @@
-# CastBrowse Project Roadmap
+# CastBrowse Roadmap
 
-This document outlines the planned architectural milestones, system features, and enhancements for upcoming releases of CastBrowse.
+### 1. System Integration
+- **Default Browser Handler**: Register `VIEW` intent for `http`/`https` links.
+- **Link Context Menu**: System text selection action (`PROCESS_TEXT`) to "Cast link to TV".
+- **Quick Settings Tile**: Status bar tile to cast clipboard link or open Streams hub.
 
----
+### 2. Universal Protocols & Connectivity
+- **Additional Protocols**: Chromecast (Google Cast), DLNA / UPnP, AirPlay, and DIAL.
+- **HTML5 Web Receiver (`/tv`)**: Built-in web player served via local proxy for TVs without app stores (LG webOS, Samsung Tizen, PlayStation/Xbox).
+- **Hotspot / Travel Mode**: Cast via phone's Wi-Fi hotspot without an external router (auto-bind to `192.168.43.1`).
+- **Network Diagnostics**: 1-tap ping and port reachability check; VPN split-tunneling warning.
 
-## 🧭 Roadmap Milestones
+### 3. Playback & Remote Control
+- **Extended Controls**: Jump steps (10s/30s), restart (0:00), loop, and aspect ratio toggles (16:9, Fill, Zoom).
+- **Queue / Play Next**: Continuous playlist playback for binge-watching.
+- **Resume Playback**: Save and restore timestamp across sessions.
+- **A/V & Subtitle Sync**: Audio delay and subtitle offset sliders (+/- 500ms).
+- **Audio Track Selector**: Multi-audio stream selection for dual-language/commentary media.
+- **External Subtitles**: Inject local `.srt`/`.vtt` files into cast streams.
+- **System Media Session**: Android lock screen and notification media controls (`MediaSession`).
 
-### 1. System Integration & Browser Intent
-- **System Browser Association**: Register CastBrowse with `<intent-filter>` for `http` and `https` schemes (`android.intent.action.VIEW` with categories `DEFAULT` and `BROWSABLE`) so users can set CastBrowse as their default browser or choose it from the "Open With..." Android app disambiguation menu.
-- **Link & Text Selection Context Menu**: Implement `android.intent.action.PROCESS_TEXT` so when a user highlights any URL in any app (Chrome, WhatsApp, Telegram, etc.), a system context action menu option **"Cast with CastBrowse"** appears to immediately fetch and cast the stream to the TV.
-- **Quick Settings (QS) Tile**:
-  - Add a Quick Settings tile in Android system shade (`TileService`).
-  - Tapping reads the current clipboard URL: if a link is present, automatically extracts media and prompts to cast; otherwise, launches CastBrowse directly to the Streams detection hub.
+### 4. Stream Extraction Intelligence
+- **Deep iFrame Scraping**: Detect streams within nested cross-origin sandbox iframes.
+- **User-Agent Presets**: 1-tap presets (iPad Safari, Smart TV) to bypass anti-mobile stream blocks.
+- **DRM Detection**: Graceful notification for Widevine-protected content that cannot be cast.
 
----
+### 5. Media Hub
+- **Offline Audio Mode**: Music player tab that casts audio while displaying a pure black screen (`#000000`) on TV.
+- **Photo Slideshows**: Cast local folders or selected photos with transition timers.
 
-### 2. Universal Protocol Casting
-- **Proprietary & Standard Casting Protocols**: Expand beyond FCast to support:
-  - **Google Cast (Chromecast)**: Google Cast SDK integration for direct casting to Chromecast and Nest Hub devices.
-  - **DLNA / UPnP**: Universal plug-and-play casting supported natively by Samsung Tizen, LG webOS, and older smart TVs without companion apps.
-  - **Apple AirPlay**: Support AirPlay 1/2 streaming to Apple TVs and AirPlay-enabled receivers.
-  - **DIAL (Discovery and Launch)**: Direct second-screen launch support for YouTube and Smart TV apps.
-
----
-
-### 3. Remote Controller & Media Experience
-- **Advanced Playback Controller**:
-  - "Start from Beginning" (seek to 0:00).
-  - Fast Forward / Rewind with customizable jump steps (10s, 30s, 60s).
-  - "Play in Loop" toggle.
-  - In-controller "Download to Device" button.
-  - Save stream state / stream bookmarks with active session headers (Referer, Cookies, User-Agent) preserved.
-- **Subtitle & Caption Injection**: Support external subtitles (`.srt`, `.vtt` sidecars) either detected from web pages or loaded from device storage, multiplexed into the cast stream.
-- **Aspect Ratio Control**: Remote aspect ratio adjustment (Fit, Fill, Zoom, 16:9, 4:3, 21:9 anamorphic) sent to receiver.
-- **System Media Notification & Lock Screen Controls**: Integrate `androidx.media3.session.MediaSession` and `MediaNotificationProvider` to provide standard Android lock screen and notification shade media controls (Play/Pause, Seek bar, Next/Prev).
-
----
-
-### 4. Offline Audio & Photo Casting
-- **Offline Music / Audio Hub**:
-  - Dedicated "Music / Audio" sub-tab in Streams screen scanning offline audio files (`.mp3`, `.flac`, `.aac`, `.wav`, `.m4a`).
-  - Casts audio streams to receivers while rendering an **absolute pitch-black screen** (`#000000`) on the TV to protect OLED displays and save energy.
-- **Photo Slideshow Casting**:
-  - Image gallery picker (folders or multi-photo selection).
-  - Cast high-resolution local photo slideshows with configurable transition intervals.
-
----
-
-### 5. UI/UX Polish & Design Consistency
-- **Fix Bottom Navigation Bar Clipping**: Resolve navigation bar content clipping by accommodating Android system gesture/3-button insets (`windowInsets` / `navigationBarsPadding()`) and standard Material 3 navigation bar heights.
-- **Desktop Site Overflow Icon**: Replace the generic `Settings` icon in the 3-dot overflow menu for "Desktop Site" with a dedicated desktop/computer monitor vector icon.
-- **Individual Stream & Device Video Dismissal**: Provide an individual delete/dismiss action on each card in both Web Streams and Device Videos to allow removing single items from the list without needing a full "Clear All".
-- **Design Language System**: Harmonize typography, border radii, tactile pressed states, haptic feedback, and dynamic color/AMOLED dark themes across all activities and dialogs.
-- **Responsive Tablet & Foldable Layout**: Split-screen two-pane layout for tablets, foldables, and Chromebooks (browser on left, streams list on right).
-
----
-
-### 6. Engineering Quality & Verification
-- **Automated Testing Suite**:
-  - Unit tests for stream extraction regex, HLS manifest rewriting, and adblock logarithmic parser.
-  - Integration tests for `LocalMediaProxy` HTTP Range requests (206 Partial Content) and headers propagation.
-  - Instrumented UI tests verifying WebView tab state preservation and navigation.
-
----
-
-### 7. Licensing, Compliance & Release Readiness
-- **Dependency Audit**: Full audit of third-party open-source licenses and compliance with MIT, Apache 2.0, and GPL guidelines.
-- **Production Readiness**: Proguard/R8 optimization review, reproducible builds, automated GitHub Actions CI/CD release pipeline, and store metadata preparation.
+### 6. UI Polish & Quality
+- **Fix Bottom Bar Insets**: Prevent navbar clipping over system gesture/3-button bars.
+- **Desktop Site Icon**: Replace gear icon with monitor/desktop icon.
+- **Dismiss Individual Items**: Delete single stream or device video from cards.
+- **Unit & Integration Tests**: Test suite for proxy partial content (206), HLS rewrites, and adblock.
+- **Licensing & Release CI/CD**: License audit, ProGuard optimization, and automated GitHub Actions release workflow.
