@@ -320,8 +320,22 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsActionItem(
+                    title = "GitHub",
+                    subtitle = "Source code & releases",
+                    icon = Icons.Default.Info,
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/madhuraj0/CastBrowse")).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(intent)
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
+                SettingsActionItem(
                     title = "Version",
-                    subtitle = "CastBrowse v1.4.0",
+                    subtitle = "CastBrowse v1.5.0",
                     icon = Icons.Default.Info,
                     onClick = {}
                 )
@@ -333,10 +347,13 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
                     .clickable { showClearSessionDialog = true }
-                    .padding(16.dp)
             ) {
                 Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {

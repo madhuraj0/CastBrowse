@@ -1,5 +1,6 @@
 package com.castbrowse.app
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,35 @@ object LocalMediaProxy {
 
     // URL to custom headers map for passing Referer, Cookie, Origin, and User-Agent upstream
     private val urlHeadersMap = ConcurrentHashMap<String, Map<String, String>>()
+
+    data class LocalMediaItem(
+        val id: String,
+        val uri: android.net.Uri,
+        val title: String,
+        val mimeType: String,
+        val size: Long
+    )
+
+    private var appContext: Context? = null
+    private val localMediaRegistry = ConcurrentHashMap<String, LocalMediaItem>()
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    fun registerLocalMedia(
+        uri: android.net.Uri,
+        title: String,
+        mimeType: String = "video/mp4",
+        size: Long = 0L,
+        receiverIp: String? = null
+    ): String {
+        start()
+        val id = java.util.UUID.randomUUID().toString().substring(0, 8)
+        localMediaRegistry[id] = LocalMediaItem(id, uri, title, mimeType, size)
+        val ip = getLocalIpAddress(receiverIp)
+        return "http://$ip:$proxyPort/local?id=$id"
+    }
 
     @Volatile
     var verifiedLocalIp: String? = null
@@ -221,6 +251,23 @@ object LocalMediaProxy {
             if (parts.size < 2) return
             val method = parts[0].uppercase()
             val path = parts[1]
+
+            if (path.startsWith("/local")) {
+                val idParamIndex = path.indexOf("id=")
+                if (idParamIndex != -1) {
+                    val rawVal = path.substring(idParamIndex + 3)
+                    val id = if (rawVal.contains("&")) rawVal.substringBefore("&") else rawVal
+                    val localItem = localMediaRegistry[id]
+                    if (localItem != null) {
+                        handleLocalFile(socket, localItem, method, clientHeaders)
+                        return
+                    }
+                }
+                val out = socket.getOutputStream()
+                out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                out.flush()
+                return
+            }
             
             val targetUrl = if (path.startsWith("/proxy")) {
                 val urlParamIndex = path.indexOf("url=")
@@ -471,6 +518,90 @@ object LocalMediaProxy {
             try {
                 socket.close()
             } catch (e: Exception) {}
+        }
+    }
+
+    private fun handleLocalFile(
+        socket: Socket,
+        item: LocalMediaItem,
+        method: String,
+        clientHeaders: Map<String, String>
+    ) {
+        val context = appContext
+        if (context == null) {
+            val out = socket.getOutputStream()
+            out.write("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n".toByteArray())
+            out.flush()
+            return
+        }
+
+        var pfd: android.os.ParcelFileDescriptor? = null
+        try {
+            pfd = context.contentResolver.openFileDescriptor(item.uri, "r")
+            val totalLength = if (pfd != null && pfd.statSize > 0) pfd.statSize else item.size
+            val out = socket.getOutputStream()
+
+            val rangeHeader = clientHeaders.entries.firstOrNull { it.key.lowercase() == "range" }?.value
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=") && totalLength > 0) {
+                val rangeVal = rangeHeader.substring(6).trim()
+                val parts = rangeVal.split("-")
+                val start = parts[0].toLongOrNull() ?: 0L
+                val end = if (parts.size > 1 && parts[1].isNotEmpty()) {
+                    parts[1].toLongOrNull()?.coerceAtMost(totalLength - 1) ?: (totalLength - 1)
+                } else {
+                    totalLength - 1
+                }
+                val contentLength = (end - start + 1).coerceAtLeast(0L)
+
+                out.write("HTTP/1.1 206 Partial Content\r\n".toByteArray())
+                out.write("Content-Range: bytes $start-$end/$totalLength\r\n".toByteArray())
+                out.write("Content-Length: $contentLength\r\n".toByteArray())
+                out.write("Content-Type: ${item.mimeType}\r\n".toByteArray())
+                out.write("Accept-Ranges: bytes\r\n".toByteArray())
+                out.write("Access-Control-Allow-Origin: *\r\n".toByteArray())
+                out.write("Connection: keep-alive\r\n\r\n".toByteArray())
+
+                if (method != "HEAD" && pfd != null) {
+                    java.io.FileInputStream(pfd.fileDescriptor).use { fis ->
+                        fis.channel.position(start)
+                        val buffer = ByteArray(65536)
+                        var bytesRemaining = contentLength
+                        while (bytesRemaining > 0) {
+                            val toRead = bytesRemaining.coerceAtMost(buffer.size.toLong()).toInt()
+                            val read = fis.read(buffer, 0, toRead)
+                            if (read <= 0) break
+                            out.write(buffer, 0, read)
+                            bytesRemaining -= read
+                        }
+                    }
+                }
+            } else {
+                out.write("HTTP/1.1 200 OK\r\n".toByteArray())
+                if (totalLength > 0) {
+                    out.write("Content-Length: $totalLength\r\n".toByteArray())
+                }
+                out.write("Content-Type: ${item.mimeType}\r\n".toByteArray())
+                out.write("Accept-Ranges: bytes\r\n".toByteArray())
+                out.write("Access-Control-Allow-Origin: *\r\n".toByteArray())
+                out.write("Connection: keep-alive\r\n\r\n".toByteArray())
+
+                if (method != "HEAD") {
+                    val stream = if (pfd != null) java.io.FileInputStream(pfd.fileDescriptor)
+                                 else context.contentResolver.openInputStream(item.uri)
+                    stream?.use { input ->
+                        val buffer = ByteArray(65536)
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            out.write(buffer, 0, read)
+                        }
+                    }
+                }
+            }
+            out.flush()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error serving local file: ${e.message}")
+        } finally {
+            try { pfd?.close() } catch (e: Exception) {}
         }
     }
 }

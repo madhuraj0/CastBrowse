@@ -20,6 +20,12 @@ Learn more and join the campaign at [keepandroidopen.org](https://keepandroidope
 
 ---
 
+## 🗺️ Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned features including system browser intent filters, Quick Settings tile, universal casting protocols (Chromecast, DLNA, AirPlay), remote controls with subtitle injection, and offline audio casting.
+
+---
+
 ## 🔒 Privacy & Security Features
 
 * **Privacy Browser**: Disables persistent cookies, DOM storage, and local file access schemes. Wipes cache and state on close.

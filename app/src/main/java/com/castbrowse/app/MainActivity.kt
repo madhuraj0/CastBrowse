@@ -11,7 +11,12 @@ import android.webkit.WebView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.OpenableColumns
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -58,6 +63,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -341,12 +348,6 @@ private val TabWindowIcon: ImageVector by lazy {
     }.build()
 }
 
-data class BookmarkItem(
-    val url: String,
-    val title: String,
-    val timestamp: Long
-)
-
 @Composable
 private fun NavCircleButton(
     icon: ImageVector,
@@ -377,71 +378,6 @@ private fun NavCircleButton(
     }
 }
 
-private fun isUrlBookmarked(context: Context, url: String): Boolean {
-    if (url.isBlank()) return false
-    val prefs = EncryptedStorage.getPreferences(context)
-    val raw = prefs.getString("bookmarks_json", "[]") ?: "[]"
-    val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
-    for (i in 0 until arr.length()) {
-        if (arr.getJSONObject(i).optString("url") == url) return true
-    }
-    return false
-}
-
-private fun toggleBookmark(context: Context, url: String, title: String): Boolean {
-    if (url.isBlank()) return false
-    val prefs = EncryptedStorage.getPreferences(context)
-    val raw = prefs.getString("bookmarks_json", "[]") ?: "[]"
-    val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
-    var foundIndex = -1
-    for (i in 0 until arr.length()) {
-        if (arr.getJSONObject(i).optString("url") == url) {
-            foundIndex = i
-            break
-        }
-    }
-    val newArr = org.json.JSONArray()
-    val isNowBookmarked: Boolean
-    if (foundIndex != -1) {
-        for (i in 0 until arr.length()) {
-            if (i != foundIndex) newArr.put(arr.getJSONObject(i))
-        }
-        isNowBookmarked = false
-        Toast.makeText(context, "Bookmark removed", Toast.LENGTH_SHORT).show()
-    } else {
-        val entry = org.json.JSONObject().apply {
-            put("url", url)
-            put("title", title.ifBlank { url })
-            put("ts", System.currentTimeMillis())
-        }
-        newArr.put(entry)
-        for (i in 0 until arr.length()) newArr.put(arr.getJSONObject(i))
-        isNowBookmarked = true
-        Toast.makeText(context, "Bookmark added", Toast.LENGTH_SHORT).show()
-    }
-    prefs.edit().putString("bookmarks_json", newArr.toString()).apply()
-    return isNowBookmarked
-}
-
-private fun loadBookmarks(prefs: android.content.SharedPreferences): List<BookmarkItem> {
-    val raw = prefs.getString("bookmarks_json", "[]") ?: "[]"
-    val arr = try { org.json.JSONArray(raw) } catch (e: Exception) { org.json.JSONArray() }
-    val result = mutableListOf<BookmarkItem>()
-    for (i in 0 until arr.length()) {
-        try {
-            val obj = arr.getJSONObject(i)
-            result.add(
-                BookmarkItem(
-                    url = obj.getString("url"),
-                    title = obj.optString("title", ""),
-                    timestamp = obj.optLong("ts", 0L)
-                )
-            )
-        } catch (e: Exception) {}
-    }
-    return result
-}
-
 class MainActivity : ComponentActivity() {
 
     private var webView: SecureWebView? = null
@@ -464,6 +400,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        LocalMediaProxy.init(this)
         LocalMediaProxy.start()
         
         // Load Adblock hosts and check for updates asynchronously
@@ -660,7 +597,11 @@ class MainActivity : ComponentActivity() {
             }
 
             // Always route through LocalMediaProxy so receiver never leaks IP to internet and bypasses 403
-            val proxiedUrl = LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
+            val proxiedUrl = if (videoUrl.contains("/local?id=")) {
+                videoUrl
+            } else {
+                LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
+            }
             android.util.Log.d("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort -> $proxiedUrl")
             val cleanTitle = videoTitle.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(videoUrl) }
             val result = FCastClient.play(
@@ -726,7 +667,6 @@ class MainActivity : ComponentActivity() {
 
         var showMoreActionsSheet by remember { mutableStateOf(false) }
         var showPageInfoDialog by remember { mutableStateOf(false) }
-        var showBookmarksDialog by remember { mutableStateOf(false) }
         var showPanicDialog by remember { mutableStateOf(false) }
         var showTabSwitcher by remember { mutableStateOf(false) }
         var detailedVideoForDialog by remember { mutableStateOf<ExtractedVideo?>(null) }
@@ -786,6 +726,20 @@ class MainActivity : ComponentActivity() {
         var findMatchIndex by remember { mutableStateOf(0) }
         var findMatchTotal by remember { mutableStateOf(0) }
 
+        var currentNavTab by remember { mutableStateOf(0) }
+        val pickedVideos = remember { mutableStateListOf<DeviceVideoItem>() }
+        val pickVideoLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetContent()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                val (name, size) = getLocalVideoInfo(context, uri)
+                if (pickedVideos.none { it.uri == uri }) {
+                    pickedVideos.add(0, DeviceVideoItem(uri = uri, title = name, size = size, isDownload = false))
+                }
+                Toast.makeText(context, "Selected: $name", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         BackHandler(enabled = showFindInPage) {
             showFindInPage = false
             findQuery = ""
@@ -794,7 +748,11 @@ class MainActivity : ComponentActivity() {
             findMatchTotal = 0
         }
 
-        BackHandler(enabled = !showFindInPage && (webView?.canGoBack() == true)) {
+        BackHandler(enabled = currentNavTab == 1) {
+            currentNavTab = 0
+        }
+
+        BackHandler(enabled = currentNavTab == 0 && !showFindInPage && (webView?.canGoBack() == true)) {
             webView?.goBack()
         }
 
@@ -1078,7 +1036,7 @@ class MainActivity : ComponentActivity() {
                                     // 1. Chrome-Style Navigation Controls Panel (with tactile Round Depth Effect)
                                     val currentUrl = activeTab.url
                                     var isBookmarked by remember(currentUrl, showMoreActionsSheet) {
-                                        mutableStateOf(isUrlBookmarked(context, currentUrl))
+                                        mutableStateOf(BookmarkHelper.isUrlBookmarked(context, currentUrl))
                                     }
 
                                     Row(
@@ -1116,7 +1074,7 @@ class MainActivity : ComponentActivity() {
                                             contentDescription = "Bookmark",
                                             tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                             onClick = {
-                                                isBookmarked = toggleBookmark(context, currentUrl, activeTab.title)
+                                                isBookmarked = BookmarkHelper.toggleBookmark(context, currentUrl, activeTab.title)
                                             }
                                         )
 
@@ -1158,14 +1116,15 @@ class MainActivity : ComponentActivity() {
                                         }
                                     )
 
-                                    // Bookmarks
+                                    // Bookmarks (opens full BookmarksActivity)
                                     DropdownMenuItem(
                                         text = { Text("Bookmarks") },
                                         leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
                                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                                         onClick = {
                                             showMoreActionsSheet = false
-                                            showBookmarksDialog = true
+                                            val intent = Intent(context, BookmarksActivity::class.java)
+                                            context.startActivity(intent)
                                         }
                                     )
 
@@ -1499,42 +1458,110 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             topBar = {
-                if (!isBottomAddressBar) {
-                    browserControls(false)
+                if (currentNavTab == 0) {
+                    if (!isBottomAddressBar) {
+                        browserControls(false)
+                    }
+                } else {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp,
+                        shadowElevation = 2.dp
+                    ) {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    "Streams",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = { currentNavTab = 0 }) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back"
+                                    )
+                                }
+                            },
+                            actions = {
+                                val activeDevice = CastSessionManager.castingDevice
+                                IconButton(onClick = {
+                                    val intent = Intent(context, CastWizardActivity::class.java)
+                                    context.startActivity(intent)
+                                }) {
+                                    Icon(
+                                        imageVector = CastIcon,
+                                        contentDescription = "Cast Setup",
+                                        tint = if (activeDevice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent,
+                                titleContentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            modifier = Modifier.statusBarsPadding()
+                        )
+                    }
                 }
             },
             bottomBar = {
                 Column {
                     miniPlayerStrip()
-                    if (isBottomAddressBar) {
+                    if (currentNavTab == 0 && isBottomAddressBar) {
                         browserControls(true)
                     }
-                }
-            },
-            floatingActionButton = {
-                // "Cast Discovered Streams" Floating Action Button
-                AnimatedVisibility(
-                    visible = extractedVideos.isNotEmpty(),
-                    enter = scaleIn() + fadeIn(),
-                    exit = scaleOut() + fadeOut()
-                ) {
-                    ExtendedFloatingActionButton(
-                        onClick = {
-                            if (selectedVideoToCast == null) {
-                                selectedVideoToCast = extractedVideos.firstOrNull()
-                            }
-                            showCastDialog = true
-                        },
-                        icon = {
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Cast", tint = Color.White)
-                        },
-                        text = {
-                            Text("Cast Detected (${extractedVideos.size})", fontWeight = FontWeight.Bold, color = Color.White)
-                        },
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp,
+                        modifier = Modifier.height(64.dp)
+                    ) {
+                        NavigationBarItem(
+                            selected = currentNavTab == 0,
+                            onClick = { currentNavTab = 0 },
+                            icon = {
+                                Icon(
+                                    imageVector = Icons.Default.Home,
+                                    contentDescription = "Browser"
+                                )
+                            },
+                            label = { Text("Browser", style = MaterialTheme.typography.labelMedium) },
+                            colors = NavigationBarItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        )
+                        NavigationBarItem(
+                            selected = currentNavTab == 1,
+                            onClick = { currentNavTab = 1 },
+                            icon = {
+                                BadgedBox(
+                                    badge = {
+                                        if (extractedVideos.isNotEmpty()) {
+                                            Badge(
+                                                containerColor = MaterialTheme.colorScheme.primary,
+                                                contentColor = MaterialTheme.colorScheme.onPrimary
+                                            ) {
+                                                Text(
+                                                    if (extractedVideos.size > 99) "99+" else "${extractedVideos.size}",
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = "Streams"
+                                    )
+                                }
+                            },
+                            label = { Text("Streams", style = MaterialTheme.typography.labelMedium) },
+                            colors = NavigationBarItemDefaults.colors(
+                                indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        )
+                    }
                 }
             }
         ) { paddingValues ->
@@ -1544,7 +1571,15 @@ class MainActivity : ComponentActivity() {
                     .padding(paddingValues)
                     .background(MaterialTheme.colorScheme.background)
             ) {
-                AndroidView(
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(if (currentNavTab == 0) 1f else 0f)
+                        .graphicsLayer {
+                            alpha = if (currentNavTab == 0) 1f else 0f
+                        }
+                ) {
+                    AndroidView(
                     factory = { ctx ->
                         val wv = SecureWebView(ctx).apply {
                             webView = this
@@ -1708,7 +1743,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize()
                 )
 
-                if (isLoading) {
+                if (isLoading && currentNavTab == 0) {
                     LinearProgressIndicator(
                         progress = { loadingProgress },
                         modifier = Modifier
@@ -1720,7 +1755,35 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+
+            // Dedicated Streams Page
+            if (currentNavTab == 1) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(2f)
+                        .background(MaterialTheme.colorScheme.background)
+                ) {
+                    StreamsPage(
+                        extractedVideos = extractedVideos,
+                        pickedVideos = pickedVideos,
+                        onPickVideo = { pickVideoLauncher.launch("video/*") },
+                        onCastVideo = { url, title ->
+                            val activeDevice = CastSessionManager.castingDevice
+                            if (activeDevice != null) {
+                                castToDevice(activeDevice, url, title, activeDevice.port)
+                            } else {
+                                selectedVideoToCast = ExtractedVideo(url = url, title = title)
+                                showCastDialog = true
+                            }
+                        },
+                        onClearExtracted = { extractedVideos.clear() },
+                        onSwitchToBrowser = { currentNavTab = 0 }
+                    )
+                }
+            }
         }
+    }
 
 
 
@@ -1829,118 +1892,6 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = { showPageInfoDialog = false }) {
                         Text("Done")
                     }
-                },
-                shape = RoundedCornerShape(24.dp),
-                containerColor = MaterialTheme.colorScheme.surface
-            )
-        }
-
-        // Bookmarks Dialog
-        if (showBookmarksDialog) {
-            var bookmarksList by remember(showBookmarksDialog) {
-                mutableStateOf(loadBookmarks(prefs))
-            }
-
-            AlertDialog(
-                onDismissRequest = { showBookmarksDialog = false },
-                title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Bookmarks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(
-                            "${bookmarksList.size}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                },
-                text = {
-                    if (bookmarksList.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "No bookmarks saved yet.\nTap the star in the menu to bookmark any page.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 380.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            items(bookmarksList, key = { it.url }) { bookmark ->
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .clickable {
-                                            showBookmarksDialog = false
-                                            handleUrlInput(bookmark.url)
-                                        },
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = bookmark.title.ifBlank { bookmark.url },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = bookmark.url,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                toggleBookmark(context, bookmark.url, bookmark.title)
-                                                bookmarksList = loadBookmarks(prefs)
-                                            },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Delete,
-                                                contentDescription = "Delete bookmark",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showBookmarksDialog = false }) { Text("Close") }
                 },
                 shape = RoundedCornerShape(24.dp),
                 containerColor = MaterialTheme.colorScheme.surface
@@ -2603,6 +2554,676 @@ class MainActivity : ComponentActivity() {
         val limit = minOf(arr.length(), 499)
         for (i in 0 until limit) newArr.put(arr.getJSONObject(i))
         prefs.edit().putString("history_json", newArr.toString()).apply()
+    }
+}
+
+data class DeviceVideoItem(
+    val uri: Uri,
+    val title: String,
+    val size: Long,
+    val isDownload: Boolean = false
+)
+
+private fun getLocalVideoInfo(context: Context, uri: Uri): Pair<String, Long> {
+    var name = "video.mp4"
+    var size = 0L
+    try {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIdx >= 0) name = cursor.getString(nameIdx) ?: "video.mp4"
+                if (sizeIdx >= 0) size = cursor.getLong(sizeIdx)
+            }
+        }
+    } catch (e: Exception) {
+        name = uri.lastPathSegment ?: "video.mp4"
+    }
+    return Pair(name, size)
+}
+
+@Composable
+private fun StreamsPage(
+    extractedVideos: List<ExtractedVideo>,
+    pickedVideos: List<DeviceVideoItem>,
+    onPickVideo: () -> Unit,
+    onCastVideo: (url: String, title: String) -> Unit,
+    onClearExtracted: () -> Unit,
+    onSwitchToBrowser: () -> Unit
+) {
+    val context = LocalContext.current
+    var subTab by remember { mutableStateOf(0) } // 0 = Web Streams, 1 = Device Videos
+
+    val downloadedVideos = remember(subTab) {
+        DownloadHelper.getDownloads(context).filter {
+            it.status == android.app.DownloadManager.STATUS_SUCCESSFUL && it.localUri != null
+        }.mapNotNull { dl ->
+            try {
+                val u = Uri.parse(dl.localUri)
+                DeviceVideoItem(uri = u, title = dl.title, size = dl.totalBytes, isDownload = true)
+            } catch (e: Exception) { null }
+        }
+    }
+    val allDeviceVideos = remember(pickedVideos.toList(), downloadedVideos) {
+        (pickedVideos + downloadedVideos).distinctBy { it.uri.toString() }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Option A: Top Tabs (Web Streams | Device Videos)
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp
+        ) {
+            TabRow(
+                selectedTabIndex = subTab,
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.primary,
+                divider = {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                }
+            ) {
+                Tab(
+                    selected = subTab == 0,
+                    onClick = { subTab = 0 },
+                    text = {
+                        Text(
+                            text = if (extractedVideos.isNotEmpty()) "Web Streams (${extractedVideos.size})" else "Web Streams",
+                            fontWeight = if (subTab == 0) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                )
+                Tab(
+                    selected = subTab == 1,
+                    onClick = { subTab = 1 },
+                    text = {
+                        Text(
+                            text = if (allDeviceVideos.isNotEmpty()) "Device Videos (${allDeviceVideos.size})" else "Device Videos",
+                            fontWeight = if (subTab == 1) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                )
+            }
+        }
+
+        // Active Receiver Header Card (if connected or not)
+        val activeDevice = CastSessionManager.castingDevice
+        Surface(
+            color = if (activeDevice != null) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = CastIcon,
+                        contentDescription = null,
+                        tint = if (activeDevice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(
+                            text = if (activeDevice != null) activeDevice.name else "No receiver connected",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (activeDevice != null) "${activeDevice.ipAddress}:${activeDevice.port}" else "Tap to pair in wizard",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        val intent = Intent(context, CastWizardActivity::class.java)
+                        context.startActivity(intent)
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(if (activeDevice != null) "Switch" else "Connect", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+
+        // Content: Web Streams vs Device Videos
+        if (subTab == 0) {
+            // WEB STREAMS
+            if (extractedVideos.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.size(60.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            "No streams detected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Navigate to video sites or play any video in the browser to extract streaming URLs.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = onSwitchToBrowser,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Open Browser")
+                        }
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "${extractedVideos.size} streams captured",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = onClearExtracted) {
+                        Text("Clear All", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    }
+                }
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(extractedVideos, key = { it.url }) { video ->
+                        WebStreamCard(
+                            video = video,
+                            onCast = { onCastVideo(video.url, video.title) }
+                        )
+                    }
+                }
+            }
+        } else {
+            // DEVICE VIDEOS
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    // Prominent "+ Pick Video from Device" Button
+                    OutlinedCard(
+                        onClick = onPickVideo,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                        colors = CardDefaults.outlinedCardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "Pick Video from Device",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                if (allDeviceVideos.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier.size(56.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    "No device videos selected",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "Pick MP4, MKV, or WebM files from device storage to stream directly to TV.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(allDeviceVideos, key = { it.uri.toString() }) { item ->
+                        DeviceVideoCard(
+                            item = item,
+                            onCast = {
+                                val mime = context.contentResolver.getType(item.uri) ?: "video/mp4"
+                                val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+                                    uri = item.uri,
+                                    title = item.title,
+                                    mimeType = mime,
+                                    size = item.size,
+                                    receiverIp = CastSessionManager.castingDevice?.ipAddress
+                                )
+                                onCastVideo(proxiedUrl, item.title)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WebStreamCard(
+    video: ExtractedVideo,
+    onCast: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val cleanTitle = video.title.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(video.url) }
+    val streamType = when {
+        video.url.contains(".m3u8") -> "HLS"
+        video.url.contains(".mpd") -> "DASH"
+        video.url.contains(".webm") -> "WebM"
+        video.url.contains(".mkv") -> "MKV"
+        else -> "MP4"
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            if (video.poster.isNotEmpty()) {
+                AsyncImage(
+                    url = video.poster,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(170.dp)
+                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                )
+            }
+
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = cleanTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Tags row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = streamType,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+
+                    if (video.resolution.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = video.resolution,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    if (video.size.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = video.size,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // URL row with copy button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .horizontalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = video.url,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            softWrap = false
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(video.url))
+                            Toast.makeText(context, "URL copied", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = CopyIcon,
+                            contentDescription = "Copy",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Action buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onCast,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Cast", fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val mime = when {
+                                video.url.contains(".m3u8") -> "application/x-mpegURL"
+                                video.url.contains(".mpd") -> "application/dash+xml"
+                                video.url.contains(".mp4") -> "video/mp4"
+                                video.url.contains(".webm") -> "video/webm"
+                                video.url.contains(".mkv") -> "video/x-matroska"
+                                else -> "video/*"
+                            }
+                            val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(video.url), mime)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            try {
+                                context.startActivity(playIntent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No compatible player found", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Play")
+                    }
+
+                    IconButton(
+                        onClick = {
+                            DownloadHelper.enqueueDownload(context, video.url, cleanTitle)
+                        }
+                    ) {
+                        Icon(
+                            imageVector = DownloadIcon,
+                            contentDescription = "Download",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            val sendIntent = Intent().apply {
+                                action = Intent.ACTION_SEND
+                                putExtra(Intent.EXTRA_TEXT, video.url)
+                                type = "text/plain"
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share Stream URL"))
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceVideoCard(
+    item: DeviceVideoItem,
+    onCast: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (item.isDownload) "Downloaded" else "Device Video",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        if (item.size > 0) {
+                            Text(
+                                text = "• ${DownloadHelper.formatBytes(item.size)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onCast,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cast to TV", fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(item.uri, "video/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(playIntent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No video player installed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Open")
+                }
+
+                IconButton(
+                    onClick = {
+                        try {
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "video/*"
+                                putExtra(Intent.EXTRA_STREAM, item.uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share Video"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Cannot share video", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
