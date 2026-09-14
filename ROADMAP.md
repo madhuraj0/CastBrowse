@@ -30,7 +30,7 @@
 - **Photo Slideshows**: Cast local folders or selected photos with transition timers.
 
 ### 6. UI Polish & Quality
-- **Fix Bottom Bar Insets**: Prevent navbar clipping over system gesture/3-button bars.
+- **Floating Glassmorphic Bottom Bar**: Floating translucent capsule with specular rim gradient, liquid selection indicator, and automatic system inset handling.
 - **Desktop Site Icon**: Replace gear icon with monitor/desktop icon.
 - **Dismiss Individual Items**: Delete single stream or device video from cards.
 - **Unit & Integration Tests**: Test suite for proxy partial content (206), HLS rewrites, and adblock.
