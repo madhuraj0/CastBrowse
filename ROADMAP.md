@@ -30,6 +30,7 @@
 - **Photo Slideshows**: Cast local folders or selected photos with transition timers.
 
 ### 6. UI Polish & Quality
+- **App-Wide Glassmorphic Design Language**: Extend a unified frosted-glass aesthetic throughout the entire application—applying translucent acrylic surfaces, specular rim gradients, soft ambient depth, and tactile micro-interactions to headers, cards, dialogs, and controller panels (not limited to the navbar).
 - **Floating Glassmorphic Bottom Bar**: Floating translucent capsule with specular rim gradient, liquid selection indicator, and automatic system inset handling.
 - **Desktop Site Icon**: Replace gear icon with monitor/desktop icon.
 - **Dismiss Individual Items**: Delete single stream or device video from cards.
