@@ -414,6 +414,9 @@ class MainActivity : ComponentActivity() {
         // Security Hardening: Block screenshots and video capture of this app
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
+        // Handle incoming shared link from other apps (process before setContent for immediate state binding)
+        handleIntent(intent)
+
         setContent {
             val context = androidx.compose.ui.platform.LocalContext.current
             val prefs = remember { EncryptedStorage.getPreferences(context) }
@@ -430,9 +433,6 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
-
-        // Handle incoming shared link from other apps
-        handleIntent(intent)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -504,6 +504,10 @@ class MainActivity : ComponentActivity() {
         val type = intent.type
         if (Intent.ACTION_PROCESS_TEXT == action) {
             val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+                ?: intent.getStringExtra(Intent.EXTRA_PROCESS_TEXT)
+                ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+                ?: intent.data?.toString()
+                ?: intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
             if (!text.isNullOrBlank()) {
                 val url = extractUrl(text)
                 requestedNavTab = 0
@@ -516,8 +520,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (Intent.ACTION_SEND == action && type != null) {
-            if ("text/plain" == type) {
+            if ("text/plain" == type || type.startsWith("text/")) {
                 val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                    ?: intent.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString()
                 if (!sharedText.isNullOrEmpty()) {
                     val url = extractUrl(sharedText)
                     requestedNavTab = 0
@@ -526,12 +532,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            return
         }
     }
 
     private fun extractUrl(text: String): String {
-        val index = text.indexOf("http://")
-        val secureIndex = text.indexOf("https://")
+        val trimmed = text.trim()
+        val index = trimmed.indexOf("http://", ignoreCase = true)
+        val secureIndex = trimmed.indexOf("https://", ignoreCase = true)
         val start = if (index != -1 && secureIndex != -1) {
             Math.min(index, secureIndex)
         } else if (index != -1) {
@@ -540,11 +548,12 @@ class MainActivity : ComponentActivity() {
             secureIndex
         }
         if (start != -1) {
-            val sub = text.substring(start)
-            val end = sub.indexOfAny(charArrayOf(' ', '\n', '\t', '\r'))
-            return if (end != -1) sub.substring(0, end) else sub
+            val sub = trimmed.substring(start)
+            val end = sub.indexOfAny(charArrayOf(' ', '\n', '\t', '\r', '"', '\'', '<', '>', '`', '\u0000'))
+            val candidate = if (end != -1) sub.substring(0, end) else sub
+            return candidate.trimEnd('.', ',', ';', ':', ')', ']', '}', '"', '\'', '`', '>')
         }
-        return text.trim()
+        return trimmed.trim('"', '\'', '<', '>', '(', ')', '[', ']', '{', '}', '`')
     }
 
     override fun onDestroy() {
@@ -590,7 +599,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleUrlInput(input: String) {
         var formattedUrl = input.trim()
-        if (!formattedUrl.startsWith("http://") && !formattedUrl.startsWith("https://")) {
+        if (!formattedUrl.startsWith("http://", ignoreCase = true) && !formattedUrl.startsWith("https://", ignoreCase = true)) {
             formattedUrl = if (formattedUrl.contains(".") && !formattedUrl.contains(" ")) {
                 "https://$formattedUrl"
             } else {
@@ -606,9 +615,15 @@ class MainActivity : ComponentActivity() {
             )
             selectedVideoToCast = video
             if (extractedVideos.none { it.url == formattedUrl }) {
-                extractedVideos.add(video)
+                extractedVideos.add(0, video)
+            }
+            val activeTabIdx = tabs.indexOfFirst { it.id == activeTabId }
+            if (activeTabIdx != -1) {
+                tabs[activeTabIdx] = tabs[activeTabIdx].copy(url = formattedUrl, title = filename)
+                tabVideos[activeTabId] = listOf(video)
             }
             showCastDialog = true
+            Toast.makeText(this, "Stream detected: $filename", Toast.LENGTH_SHORT).show()
         } else {
             val activeTabIdx = tabs.indexOfFirst { it.id == activeTabId }
             if (activeTabIdx != -1) {
@@ -622,13 +637,43 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isDirectVideoLink(url: String): Boolean {
-        return try {
-            val path = URI(url).path?.lowercase() ?: return false
-            path.endsWith(".mp4") || path.endsWith(".m3u8") || path.endsWith(".m3u") ||
-                    path.endsWith(".webm") || path.endsWith(".mpd") || path.endsWith(".mkv")
-        } catch (e: Exception) {
-            false
+        if (url.isBlank()) return false
+        val cleanUrl = url.trim()
+
+        if (MediaExtractorClient.isSegmentUrl(cleanUrl)) {
+            return false
         }
+
+        // 1. Check path via Android Uri
+        try {
+            val parsedUri = android.net.Uri.parse(cleanUrl)
+            val path = parsedUri.path?.lowercase() ?: ""
+            if (path.endsWith(".mp4") || path.endsWith(".m3u8") || path.endsWith(".m3u") ||
+                path.endsWith(".webm") || path.endsWith(".mpd") || path.endsWith(".mkv") ||
+                path.endsWith(".mov") || path.endsWith(".flv") || path.endsWith(".ts") ||
+                path.endsWith(".m4v") || path.endsWith(".avi") || path.endsWith(".3gp") ||
+                path.endsWith(".ogv")) {
+                return true
+            }
+        } catch (ignored: Exception) {}
+
+        // 2. Check path before query parameters or hash
+        val urlWithoutQuery = cleanUrl.substringBefore('?').substringBefore('#').lowercase()
+        if (urlWithoutQuery.endsWith(".mp4") || urlWithoutQuery.endsWith(".m3u8") ||
+            urlWithoutQuery.endsWith(".m3u") || urlWithoutQuery.endsWith(".webm") ||
+            urlWithoutQuery.endsWith(".mpd") || urlWithoutQuery.endsWith(".mkv") ||
+            urlWithoutQuery.endsWith(".mov") || urlWithoutQuery.endsWith(".flv") ||
+            urlWithoutQuery.endsWith(".ts") || urlWithoutQuery.endsWith(".m4v") ||
+            urlWithoutQuery.endsWith(".avi") || urlWithoutQuery.endsWith(".3gp") ||
+            urlWithoutQuery.endsWith(".ogv")) {
+            return true
+        }
+
+        // 3. Check for standard media regex and dynamic stream indicators
+        return MediaExtractorClient.MEDIA_REGEX.containsMatchIn(cleanUrl) ||
+                cleanUrl.contains(".m3u8", ignoreCase = true) ||
+                cleanUrl.contains(".mpd", ignoreCase = true) ||
+                cleanUrl.contains(".mp4", ignoreCase = true)
     }
 
     private fun castToDevice(device: CastDevice, videoUrl: String, videoTitle: String, customFCastPort: Int) {
@@ -1653,7 +1698,14 @@ class MainActivity : ComponentActivity() {
                                 isAdBlockEnabled = { isAdBlockEnabled },
                                 isDesktopMode = { isDesktopMode },
                                 onPageStarted = { newUrl ->
+                                    val directVideo = selectedVideoToCast?.takeIf {
+                                        isDirectVideoLink(it.url) && (it.url == newUrl || newUrl.startsWith("https://html.duckduckgo.com") || newUrl == "about:blank")
+                                    }
                                     extractedVideos.clear()
+                                    if (directVideo != null) {
+                                        extractedVideos.add(directVideo)
+                                        tabVideos[activeTabId] = listOf(directVideo)
+                                    }
                                     val activeTabIdx = tabs.indexOfFirst { it.id == activeTabId }
                                     if (activeTabIdx != -1) {
                                         tabs[activeTabIdx] = tabs[activeTabIdx].copy(url = newUrl)

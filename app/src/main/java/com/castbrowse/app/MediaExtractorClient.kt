@@ -42,7 +42,7 @@ class MediaExtractorClient(
 
     companion object {
         private const val TAG = "MediaExtractorClient"
-        private val MEDIA_REGEX = Regex("\\.(mp4|webm|m3u8|m3u|mpd|ogg|mkv)(\\?.*)?$", RegexOption.IGNORE_CASE)
+        internal val MEDIA_REGEX = Regex("\\.(mp4|webm|m3u8|m3u|mpd|ogg|mkv)(\\?.*)?$", RegexOption.IGNORE_CASE)
         private val DYNAMIC_STREAM_REGEX = Regex("(?i)(\\.m3u8|\\.mp4|\\.webm|\\.mpd|/playlist|/manifest|/master|/chunklist)")
         private val SEGMENT_REGEX = Regex("(?i)(\\.m4s|\\.ts|init\\.mp4|init\\.m4s|/seg-\\d+|/chunk-\\d+|/fragment-\\d+|/segment/|/fragment/|/chunk/|/seg_|/chunk_|/fragment_)")
 
