@@ -36,7 +36,28 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+            <!-- Browser Handler: Open web links directly in CastBrowse -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
         </activity>
+
+        <!-- System text selection context menu: "Cast with CastBrowse" -->
+        <activity-alias
+            android:name=".CastProcessTextActivity"
+            android:targetActivity=".MainActivity"
+            android:label="Cast with CastBrowse"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
 
         <activity
             android:name=".CastWizardActivity"
@@ -78,6 +99,18 @@
             android:name=".CastPlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Quick Settings Status Bar Tile -->
+        <service
+            android:name=".CastTileService"
+            android:label="CastBrowse"
+            android:icon="@drawable/ic_cast_tile"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

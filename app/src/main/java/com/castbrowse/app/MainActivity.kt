@@ -396,6 +396,9 @@ class MainActivity : ComponentActivity() {
     private var showCastDialog by mutableStateOf(false)
     private var selectedVideoToCast by mutableStateOf<ExtractedVideo?>(null)
 
+    // Requested navigation tab from external intents (0 = Browser, 1 = Streams Hub)
+    private var requestedNavTab by mutableStateOf<Int?>(null)
+
     data class BrowserTab(val id: Int, val title: String, val url: String)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -443,23 +446,43 @@ class MainActivity : ComponentActivity() {
             triggerPanicWipe()
             return
         }
+        if (intent.getBooleanExtra("EXTRA_OPEN_STREAMS", false)) {
+            requestedNavTab = 1
+            return
+        }
         val extraUrl = intent.getStringExtra("EXTRA_LOAD_URL")
         if (!extraUrl.isNullOrEmpty()) {
+            requestedNavTab = 0
             handleUrlInput(extraUrl)
             return
         }
         val dataUri = intent.data
         if (dataUri != null) {
+            requestedNavTab = 0
             handleUrlInput(dataUri.toString())
             return
         }
         val action = intent.action
         val type = intent.type
+        if (Intent.ACTION_PROCESS_TEXT == action) {
+            val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString()
+            if (!text.isNullOrBlank()) {
+                val url = extractUrl(text)
+                requestedNavTab = 0
+                if (url.isNotEmpty()) {
+                    handleUrlInput(url)
+                } else {
+                    handleUrlInput(text)
+                }
+            }
+            return
+        }
         if (Intent.ACTION_SEND == action && type != null) {
             if ("text/plain" == type) {
                 val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
                 if (!sharedText.isNullOrEmpty()) {
                     val url = extractUrl(sharedText)
+                    requestedNavTab = 0
                     if (url.isNotEmpty()) {
                         handleUrlInput(url)
                     }
@@ -727,6 +750,12 @@ class MainActivity : ComponentActivity() {
         var findMatchTotal by remember { mutableStateOf(0) }
 
         var currentNavTab by remember { mutableStateOf(0) }
+        LaunchedEffect(requestedNavTab) {
+            requestedNavTab?.let {
+                currentNavTab = it
+                requestedNavTab = null
+            }
+        }
         val pickedVideos = remember { mutableStateListOf<DeviceVideoItem>() }
         val pickVideoLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.GetContent()
