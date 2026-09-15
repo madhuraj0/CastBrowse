@@ -74,10 +74,13 @@ fun SettingsScreen(
     val context = LocalContext.current
     val prefs = remember { EncryptedStorage.getPreferences(context) }
 
+    val isAmoled = currentTheme == "amoled"
+    val isDark = currentTheme != "light"
+
     var isAdBlockEnabled by remember { mutableStateOf(prefs.getBoolean("adblock_enabled", true)) }
     var isPopupsEnabled by remember { mutableStateOf(prefs.getBoolean("popups_enabled", false)) }
     var isDesktopDefault by remember { mutableStateOf(prefs.getBoolean("desktop_mode", false)) }
-    var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", false)) }
+    var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", true)) }
     var isTabBarEnabled by remember { mutableStateOf(prefs.getBoolean("show_tab_bar", true)) }
     var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
 
@@ -89,10 +92,16 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 2.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .refractiveGlass(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        isDark = isDark,
+                        isAmoled = isAmoled,
+                        elevation = 8.dp
+                    )
             ) {
                 TopAppBar(
                     title = {
@@ -113,8 +122,7 @@ fun SettingsScreen(
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
                         titleContentColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.statusBarsPadding()
+                    )
                 )
             }
         }
@@ -526,12 +534,16 @@ fun SettingsSection(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
         )
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.fillMaxWidth()
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .refractiveGlass(
+                    shape = RoundedCornerShape(20.dp),
+                    elevation = 6.dp
+                )
+                .padding(vertical = 4.dp)
         ) {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            Column {
                 content()
             }
         }
@@ -553,19 +565,18 @@ fun SettingsActionItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.size(36.dp)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -604,19 +615,18 @@ fun SettingsToggleItem(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.size(36.dp)
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(

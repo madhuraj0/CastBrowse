@@ -53,10 +53,19 @@ import androidx.compose.ui.unit.sp
 import org.json.JSONArray
 import org.json.JSONObject
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
+
 /**
- * Premium Glassmorphic Design System
- * Provides acrylic frosted glass surfaces, specular rim gradients, soft depth,
- * floating glass bottom bar, speed dial bookmarks, and tactile fluid physics micro-animations.
+ * Premium Refractive Liquid Glass Design System
+ * Provides multi-layer specular rim gradients, caustic highlights,
+ * two-row chocolate bar bottom navigation, speed dial bookmarks,
+ * and tactile fluid physics micro-animations.
  */
 object GlassmorphicTheme {
 
@@ -132,6 +141,152 @@ object GlassmorphicTheme {
             )
         }
     }
+    /**
+     * Refractive specular rim gradient border simulating liquid glass refraction.
+     * High specular reflection at top-left edge, subtle chromatic dispersion along the curve,
+     * and caustic depth towards bottom-right.
+     */
+    fun refractiveBorder(
+        isDark: Boolean = true,
+        isAmoled: Boolean = false,
+        width: Dp = 1.dp
+    ): BorderStroke {
+        val topHighlight = when {
+            isAmoled -> Color.White.copy(alpha = 0.38f)
+            isDark -> Color.White.copy(alpha = 0.42f)
+            else -> Color.White.copy(alpha = 0.85f)
+        }
+        val midCaustic = when {
+            isAmoled -> Color(0xFF6366F1).copy(alpha = 0.18f)
+            isDark -> Color(0xFF818CF8).copy(alpha = 0.22f)
+            else -> Color(0xFF6366F1).copy(alpha = 0.15f)
+        }
+        val bottomShadow = when {
+            isAmoled -> Color.White.copy(alpha = 0.05f)
+            isDark -> Color.White.copy(alpha = 0.08f)
+            else -> Color.Black.copy(alpha = 0.08f)
+        }
+        return BorderStroke(
+            width = width,
+            brush = Brush.linearGradient(
+                colors = listOf(topHighlight, midCaustic, bottomShadow),
+                start = Offset.Zero,
+                end = Offset.Infinite
+            )
+        )
+    }
+
+    /**
+     * Translucent liquid glass gradient with caustics and highlights.
+     */
+    fun refractiveGlassBrush(
+        isDark: Boolean = true,
+        isAmoled: Boolean = false
+    ): Brush {
+        return if (isAmoled) {
+            Brush.linearGradient(
+                colors = listOf(
+                    Color(0xFF161822).copy(alpha = 0.85f),
+                    Color(0xFF0C0D14).copy(alpha = 0.90f),
+                    Color(0xFF131520).copy(alpha = 0.82f),
+                    Color(0xFF07080C).copy(alpha = 0.94f)
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite
+            )
+        } else if (isDark) {
+            Brush.linearGradient(
+                colors = listOf(
+                    Color(0xFF282D42).copy(alpha = 0.78f),
+                    Color(0xFF1B1E2E).copy(alpha = 0.85f),
+                    Color(0xFF22263A).copy(alpha = 0.75f),
+                    Color(0xFF141624).copy(alpha = 0.90f)
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite
+            )
+        } else {
+            Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.92f),
+                    Color(0xFFF1F5FB).copy(alpha = 0.84f),
+                    Color.White.copy(alpha = 0.88f),
+                    Color(0xFFE5ECF6).copy(alpha = 0.86f)
+                ),
+                start = Offset.Zero,
+                end = Offset.Infinite
+            )
+        }
+    }
+}
+
+/**
+ * Custom Compose Shape representing a dual-segment chocolate bar.
+ * Features rounded corners and smooth inward waist notches on the left and right sides
+ * where the two rows are joined as one continuous unit.
+ */
+class ChocolateBarShape(
+    val cornerRadius: Dp = 26.dp,
+    val notchDepth: Dp = 6.dp,
+    val notchHeight: Dp = 14.dp,
+    val waistFraction: Float = 0.50f
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density
+    ): Outline {
+        val r = with(density) { cornerRadius.toPx() }.coerceAtMost(size.minDimension / 2f)
+        val nd = with(density) { notchDepth.toPx() }
+        val nh = with(density) { notchHeight.toPx() }
+        val w = size.width
+        val h = size.height
+        val waistY = h * waistFraction
+
+        val path = Path().apply {
+            moveTo(r, 0f)
+            lineTo(w - r, 0f)
+            quadraticBezierTo(w, 0f, w, r)
+
+            val rightNotchTop = (waistY - nh / 2f).coerceAtLeast(r)
+            val rightNotchBottom = (waistY + nh / 2f).coerceAtMost(h - r)
+            lineTo(w, rightNotchTop)
+            cubicTo(
+                w - nd * 0.4f, rightNotchTop,
+                w - nd, waistY - nh * 0.2f,
+                w - nd, waistY
+            )
+            cubicTo(
+                w - nd, waistY + nh * 0.2f,
+                w - nd * 0.4f, rightNotchBottom,
+                w, rightNotchBottom
+            )
+
+            lineTo(w, h - r)
+            quadraticBezierTo(w, h, w - r, h)
+            lineTo(r, h)
+            quadraticBezierTo(0f, h, 0f, h - r)
+
+            val leftNotchBottom = (waistY + nh / 2f).coerceAtMost(h - r)
+            val leftNotchTop = (waistY - nh / 2f).coerceAtLeast(r)
+            lineTo(0f, leftNotchBottom)
+            cubicTo(
+                nd * 0.4f, leftNotchBottom,
+                nd, waistY + nh * 0.2f,
+                nd, waistY
+            )
+            cubicTo(
+                nd, waistY - nh * 0.2f,
+                nd * 0.4f, leftNotchTop,
+                0f, leftNotchTop
+            )
+
+            lineTo(0f, r)
+            quadraticBezierTo(0f, 0f, r, 0f)
+            close()
+        }
+        return Outline.Generic(path)
+    }
 }
 
 /**
@@ -151,6 +306,35 @@ fun Modifier.glassmorphic(
     )
     .background(
         brush = GlassmorphicTheme.cardGlassGradient(isDark, isAmoled),
+        shape = shape
+    )
+    .clip(shape)
+
+/**
+ * Modifier extension: Apply refractive liquid glass surface with specular rim,
+ * caustic glow shadow, and translucent refractive backdrop.
+ */
+fun Modifier.refractiveGlass(
+    shape: Shape = RoundedCornerShape(20.dp),
+    isDark: Boolean = true,
+    isAmoled: Boolean = false,
+    borderWidth: Dp = 1.dp,
+    elevation: Dp = 10.dp,
+    glowColor: Color? = null
+): Modifier = this
+    .shadow(
+        elevation = elevation,
+        shape = shape,
+        clip = false,
+        ambientColor = if (isDark) Color.Black.copy(alpha = 0.50f) else Color.Black.copy(alpha = 0.12f),
+        spotColor = glowColor ?: (if (isDark) Color(0xFF6366F1).copy(alpha = 0.28f) else Color(0xFF6366F1).copy(alpha = 0.15f))
+    )
+    .background(
+        brush = GlassmorphicTheme.refractiveGlassBrush(isDark, isAmoled),
+        shape = shape
+    )
+    .border(
+        border = GlassmorphicTheme.refractiveBorder(isDark, isAmoled, borderWidth),
         shape = shape
     )
     .clip(shape)
@@ -272,9 +456,210 @@ object SpeedDialManager {
 }
 
 /**
- * Floating Glassmorphic Bottom Navigation Bar
- * Translucent pill capsule with specular rim gradient, liquid spring selection indicator,
- * and system navigation bar inset handling.
+ * Refractive Liquid Glass Chocolate Bottom Navigation Bar.
+ * Joined like a chocolate bar: single floating unit with subtle side indentations (notches)
+ * and an etched snap line separating the two rows.
+ * Top Row: Address bar, tab counter icon, three dot menu button.
+ * Bottom Row: Browser and Stream (Media Hub) tabs with liquid sliding selection indicator.
+ */
+@Composable
+fun ChocolateBottomBar(
+    currentNavTab: Int,
+    onTabSelected: (Int) -> Unit,
+    extractedVideoCount: Int,
+    isDark: Boolean,
+    isAmoled: Boolean,
+    modifier: Modifier = Modifier,
+    topRowContent: @Composable RowScope.() -> Unit
+) {
+    val chocolateShape = remember {
+        ChocolateBarShape(
+            cornerRadius = 24.dp,
+            notchDepth = 5.dp,
+            notchHeight = 12.dp,
+            waistFraction = 0.50f
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .refractiveGlass(
+                    shape = chocolateShape,
+                    isDark = isDark,
+                    isAmoled = isAmoled,
+                    borderWidth = 1.dp,
+                    elevation = 14.dp
+                )
+        ) {
+            // Top Row: Address bar, Tab count, Three-dot menu
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                topRowContent()
+            }
+
+            // Chocolate Bar Waist Snap Groove (Etched specular horizontal divider)
+            val grooveShadow = if (isDark) Color.Black.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.12f)
+            val grooveHighlight = if (isDark) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.65f)
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+            ) {
+                val nd = 5.dp.toPx()
+                drawLine(
+                    color = grooveShadow,
+                    start = Offset(nd, 0f),
+                    end = Offset(size.width - nd, 0f),
+                    strokeWidth = 1f
+                )
+                drawLine(
+                    color = grooveHighlight,
+                    start = Offset(nd, 1f),
+                    end = Offset(size.width - nd, 1f),
+                    strokeWidth = 1f
+                )
+            }
+
+            // Bottom Row: Browser and Stream (Media Hub) navigation tabs
+            BoxWithConstraints(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+            ) {
+                val tabWidth = maxWidth / 2
+                val indicatorOffset by animateDpAsState(
+                    targetValue = if (currentNavTab == 0) 0.dp else tabWidth,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "chocolateBottomBarIndicator"
+                )
+
+                // Liquid sliding selection pill indicator
+                Box(
+                    modifier = Modifier
+                        .offset(x = indicatorOffset)
+                        .width(tabWidth)
+                        .fillMaxHeight()
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.32f else 0.20f),
+                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.18f else 0.10f)
+                                )
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(20.dp)
+                        )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Browser Tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { onTabSelected(0) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = "Browser",
+                                tint = if (currentNavTab == 0) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.size(19.dp)
+                            )
+                            Text(
+                                text = "Browser",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (currentNavTab == 0) FontWeight.Bold else FontWeight.Medium,
+                                color = if (currentNavTab == 0) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                            )
+                        }
+                    }
+
+                    // Stream / Media Hub Tab
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable { onTabSelected(1) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            BadgedBox(
+                                badge = {
+                                    if (extractedVideoCount > 0) {
+                                        Badge(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ) {
+                                            Text(
+                                                if (extractedVideoCount > 99) "99+" else "$extractedVideoCount",
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Stream",
+                                    tint = if (currentNavTab == 1) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                            Text(
+                                text = "Stream",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (currentNavTab == 1) FontWeight.Bold else FontWeight.Medium,
+                                color = if (currentNavTab == 1) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Floating Refractive Glass Bottom Navigation Bar (Single Pill for top address bar mode)
  */
 @Composable
 fun FloatingGlassmorphicBottomBar(
@@ -289,26 +674,20 @@ fun FloatingGlassmorphicBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        val capsuleShape = RoundedCornerShape(28.dp)
-        Surface(
-            shape = capsuleShape,
-            color = Color.Transparent,
-            border = GlassmorphicTheme.specularBorder(isDark = isDark, isAmoled = isAmoled, width = 1.dp),
+        val capsuleShape = RoundedCornerShape(26.dp)
+        Box(
             modifier = Modifier
-                .shadow(
-                    elevation = if (isDark) 12.dp else 8.dp,
+                .refractiveGlass(
                     shape = capsuleShape,
-                    ambientColor = if (isDark) Color.Black.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.12f),
-                    spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                    isDark = isDark,
+                    isAmoled = isAmoled,
+                    borderWidth = 1.dp,
+                    elevation = 12.dp
                 )
-                .background(
-                    brush = GlassmorphicTheme.cardGlassGradient(isDark = isDark, isAmoled = isAmoled),
-                    shape = capsuleShape
-                )
-                .height(58.dp)
+                .height(54.dp)
                 .fillMaxWidth()
         ) {
             BoxWithConstraints(
@@ -333,19 +712,19 @@ fun FloatingGlassmorphicBottomBar(
                         .width(tabWidth)
                         .fillMaxHeight()
                         .padding(2.dp)
-                        .clip(RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(22.dp))
                         .background(
                             brush = Brush.horizontalGradient(
                                 colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.28f else 0.18f),
+                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.32f else 0.20f),
                                     MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.18f else 0.10f)
                                 )
                             )
                         )
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                            shape = RoundedCornerShape(24.dp)
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(22.dp)
                         )
                 )
 
@@ -358,7 +737,7 @@ fun FloatingGlassmorphicBottomBar(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(RoundedCornerShape(22.dp))
                             .clickable { onTabSelected(0) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -388,7 +767,7 @@ fun FloatingGlassmorphicBottomBar(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(RoundedCornerShape(22.dp))
                             .clickable { onTabSelected(1) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -467,27 +846,14 @@ fun SpeedDialHomeScreen(
         ) {
             Spacer(modifier = Modifier.height(28.dp))
 
-            // Brand Header with Specular Glass Surface
-            Surface(
-                shape = CircleShape,
-                color = Color.Transparent,
-                border = GlassmorphicTheme.specularBorder(isDark = isDark, isAmoled = isAmoled, width = 1.2.dp),
+            // Brand Header with Specular Refractive Glass Surface
+            Box(
                 modifier = Modifier
-                    .shadow(elevation = 10.dp, shape = CircleShape)
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                            )
-                        ),
-                        shape = CircleShape
-                    )
                     .size(64.dp)
+                    .refractiveGlass(shape = CircleShape, isDark = isDark, isAmoled = isAmoled, elevation = 12.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text("📡", fontSize = 28.sp)
-                }
+                Text("📡", fontSize = 28.sp)
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -507,18 +873,11 @@ fun SpeedDialHomeScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Glassmorphic Quick Search / URL Bar
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color.Transparent,
-                border = GlassmorphicTheme.specularBorder(isDark = isDark, isAmoled = isAmoled, width = 1.dp),
+            // Refractive Liquid Glass Quick Search / URL Bar
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .shadow(elevation = 6.dp, shape = RoundedCornerShape(20.dp))
-                    .background(
-                        brush = GlassmorphicTheme.cardGlassGradient(isDark = isDark, isAmoled = isAmoled),
-                        shape = RoundedCornerShape(20.dp)
-                    )
+                    .refractiveGlass(shape = RoundedCornerShape(22.dp), isDark = isDark, isAmoled = isAmoled, elevation = 8.dp)
             ) {
                 Row(
                     modifier = Modifier
@@ -660,32 +1019,24 @@ fun SpeedDialHomeScreen(
                                     .fillMaxWidth()
                                     .padding(vertical = 6.dp)
                             ) {
-                                // Shortcut Icon Tile
+                                // Refractive Glass Shortcut Icon Tile
+                                val tileColor = Color(item.accentColor)
                                 Box(
                                     modifier = Modifier
                                         .size(54.dp)
-                                        .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp))
-                                        .border(
-                                            border = GlassmorphicTheme.specularBorder(isDark, isAmoled, 1.dp),
-                                            shape = RoundedCornerShape(16.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(16.dp),
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
+                                            elevation = 6.dp,
+                                            glowColor = if (!isAddTile) tileColor.copy(alpha = 0.35f) else null
                                         )
                                         .background(
-                                            brush = if (isAddTile) {
-                                                Brush.linearGradient(
-                                                    listOf(
-                                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                                    )
-                                                )
+                                            if (isAddTile) {
+                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
                                             } else {
-                                                Brush.linearGradient(
-                                                    listOf(
-                                                        Color(item.accentColor).copy(alpha = 0.28f),
-                                                        Color(item.accentColor).copy(alpha = 0.12f)
-                                                    )
-                                                )
-                                            },
-                                            shape = RoundedCornerShape(16.dp)
+                                                tileColor.copy(alpha = if (isDark) 0.22f else 0.14f)
+                                            }
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {

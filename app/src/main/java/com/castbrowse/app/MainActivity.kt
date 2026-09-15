@@ -449,16 +449,25 @@ private fun NavCircleButton(
 ) {
     Surface(
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-        shadowElevation = 2.dp,
-        modifier = Modifier.size(38.dp)
+        color = Color.Transparent,
+        border = GlassmorphicTheme.specularBorder(width = 1.dp),
+        shadowElevation = 3.dp,
+        modifier = Modifier
+            .size(38.dp)
+            .background(
+                brush = Brush.radialGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)
+                    )
+                ),
+                shape = CircleShape
+            )
+            .tactilePress {
+                if (enabled) onClick()
+            }
     ) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = Modifier.fillMaxSize()
-        ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
             Icon(
                 imageVector = icon,
                 contentDescription = contentDescription,
@@ -887,8 +896,10 @@ class MainActivity : ComponentActivity() {
         var showPanicDialog by remember { mutableStateOf(false) }
         var showTabSwitcher by remember { mutableStateOf(false) }
         var detailedVideoForDialog by remember { mutableStateOf<ExtractedVideo?>(null) }
+        val isAmoled = themeMode == "amoled"
+        val isDark = themeMode != "light"
         val prefs = remember { EncryptedStorage.getPreferences(context) }
-        val isBottomAddressBar = remember { prefs.getBoolean("bottom_address_bar", false) }
+        val isBottomAddressBar = remember { prefs.getBoolean("bottom_address_bar", true) }
         val showTabBar = remember { prefs.getBoolean("show_tab_bar", true) }
 
         val switchTab: (Int) -> Unit = { targetId ->
@@ -1113,62 +1124,53 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val browserControls = @Composable { isBottom: Boolean ->
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 4.dp,
-                shadowElevation = 4.dp
-            ) {
-                Column(modifier = if (isBottom) Modifier.navigationBarsPadding() else Modifier.statusBarsPadding()) {
-                    if (!isBottom && showTabBar) {
-                        tabsRow()
-                    }
-
-                    // Chrome Address Bar Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Casting Connection Indicator on the left of address bar (clicking opens connection wizard)
-                        if (!addressBarFocused) {
-                            val activeDevice = CastSessionManager.castingDevice
-                            IconButton(
-                                onClick = {
-                                    val intent = android.content.Intent(context, CastWizardActivity::class.java)
-                                    context.startActivity(intent)
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Icon(
-                                    imageVector = CastIcon,
-                                    contentDescription = "Casting Setup",
-                                    tint = if (activeDevice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.width(4.dp))
+        val addressBarRowContent: @Composable RowScope.() -> Unit = {
+            // Casting Connection Indicator on the left of address bar (clicking opens connection wizard)
+            if (!addressBarFocused) {
+                val activeDevice = CastSessionManager.castingDevice
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Transparent,
+                    border = GlassmorphicTheme.specularBorder(isDark, isAmoled, 1.dp),
+                    modifier = Modifier
+                        .size(34.dp)
+                        .background(
+                            brush = GlassmorphicTheme.refractiveGlassBrush(isDark, isAmoled),
+                            shape = CircleShape
+                        )
+                        .shadow(3.dp, CircleShape, spotColor = if (activeDevice != null) MaterialTheme.colorScheme.primary else Color.Transparent)
+                        .clickable {
+                            val intent = android.content.Intent(context, CastWizardActivity::class.java)
+                            context.startActivity(intent)
                         }
- 
-                        // Address / search field container with horizontal swipe to switch tabs
-                        var accumulatedDrag by remember { mutableStateOf(0f) }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(22.dp))
-                                .background(
-                                    if (addressBarFocused) MaterialTheme.colorScheme.surface
-                                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                )
-                                .border(
-                                    width = if (addressBarFocused) 2.dp else 1.dp,
-                                    color = if (addressBarFocused) MaterialTheme.colorScheme.primary 
-                                            else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(22.dp)
-                                )
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = CastIcon,
+                            contentDescription = "Casting Setup",
+                            tint = if (activeDevice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+
+            // Address / search field container with horizontal swipe to switch tabs
+            var accumulatedDrag by remember { mutableStateOf(0f) }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(38.dp)
+                    .refractiveGlass(
+                        shape = RoundedCornerShape(19.dp),
+                        isDark = isDark,
+                        isAmoled = isAmoled,
+                        borderWidth = if (addressBarFocused) 1.5.dp else 1.dp,
+                        elevation = if (addressBarFocused) 6.dp else 2.dp,
+                        glowColor = if (addressBarFocused) MaterialTheme.colorScheme.primary else null
+                    )
                                 .pointerInput(tabs.size, activeTabId) {
                                     detectHorizontalDragGestures(
                                         onDragStart = { accumulatedDrag = 0f },
@@ -1281,11 +1283,15 @@ class MainActivity : ComponentActivity() {
  
                             // Chrome-style Tab Counter Button
                             Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)),
+                                shape = RoundedCornerShape(8.dp),
+                                border = GlassmorphicTheme.specularBorder(isDark, isAmoled, 1.dp),
                                 color = Color.Transparent,
                                 modifier = Modifier
-                                    .size(28.dp)
+                                    .size(30.dp)
+                                    .background(
+                                        brush = GlassmorphicTheme.refractiveGlassBrush(isDark, isAmoled),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
                                     .clickable { showTabSwitcher = true }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -1304,21 +1310,28 @@ class MainActivity : ComponentActivity() {
 
                             // Three-dot menu anchor with popover DropdownMenu
                             Box {
-                                IconButton(onClick = { showMoreActionsSheet = true }) {
+                                IconButton(
+                                    onClick = { showMoreActionsSheet = true },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
                                     Icon(
                                         imageVector = Icons.Default.MoreVert,
                                         contentDescription = "Menu",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 DropdownMenu(
                                     expanded = showMoreActionsSheet,
                                     onDismissRequest = { showMoreActionsSheet = false },
                                     modifier = Modifier
-                                        .width(250.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                        .width(265.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(22.dp),
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
+                                            elevation = 16.dp
+                                        )
                                         .padding(vertical = 8.dp)
                                 ) {
                                     // 1. Chrome-Style Navigation Controls Panel (with tactile Round Depth Effect)
@@ -1564,113 +1577,138 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                    }
+        }
 
+        val findInPageBar = @Composable {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Find in page",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    BasicTextField(
+                        value = findQuery,
+                        onValueChange = { query ->
+                            findQuery = query
+                            if (query.isNotEmpty()) {
+                                webView?.findAllAsync(query)
+                            } else {
+                                webView?.clearMatches()
+                                findMatchIndex = 0
+                                findMatchTotal = 0
+                            }
+                        },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { innerTextField ->
+                            if (findQuery.isEmpty()) {
+                                Text(
+                                    "Find in page...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                            }
+                            innerTextField()
+                        }
+                    )
+                    if (findQuery.isNotEmpty()) {
+                        Text(
+                            text = if (findMatchTotal > 0) "$findMatchIndex/$findMatchTotal" else "0/0",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                        IconButton(
+                            onClick = { webView?.findNext(false) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = UpArrowIcon,
+                                contentDescription = "Previous match",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(
+                            onClick = { webView?.findNext(true) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = DownArrowIcon,
+                                contentDescription = "Next match",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = {
+                            showFindInPage = false
+                            findQuery = ""
+                            webView?.clearMatches()
+                            findMatchIndex = 0
+                            findMatchTotal = 0
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close Find in page",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        val browserControls = @Composable { isBottom: Boolean ->
+            Box(
+                modifier = (if (isBottom) Modifier.navigationBarsPadding() else Modifier.statusBarsPadding())
+                    .fillMaxWidth()
+                    .refractiveGlass(
+                        shape = if (isBottom) RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp) else RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        isDark = isDark,
+                        isAmoled = isAmoled,
+                        elevation = 8.dp
+                    )
+            ) {
+                Column {
+                    if (!isBottom && showTabBar) {
+                        tabsRow()
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        addressBarRowContent()
+                    }
                     if (isBottom && showTabBar) {
                         tabsRow()
                     }
-
-                    // Find in Page Bar
                     AnimatedVisibility(
                         visible = showFindInPage,
                         enter = expandVertically() + fadeIn(),
                         exit = shrinkVertically() + fadeOut()
                     ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            tonalElevation = 2.dp,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "Find in page",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                BasicTextField(
-                                    value = findQuery,
-                                    onValueChange = { query ->
-                                        findQuery = query
-                                        if (query.isNotEmpty()) {
-                                            webView?.findAllAsync(query)
-                                        } else {
-                                            webView?.clearMatches()
-                                            findMatchIndex = 0
-                                            findMatchTotal = 0
-                                        }
-                                    },
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    ),
-                                    modifier = Modifier.weight(1f),
-                                    decorationBox = { innerTextField ->
-                                        if (findQuery.isEmpty()) {
-                                            Text(
-                                                "Find in page...",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                            )
-                                        }
-                                        innerTextField()
-                                    }
-                                )
-                                if (findQuery.isNotEmpty()) {
-                                    Text(
-                                        text = if (findMatchTotal > 0) "$findMatchIndex/$findMatchTotal" else "0/0",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        modifier = Modifier.padding(horizontal = 4.dp)
-                                    )
-                                    IconButton(
-                                        onClick = { webView?.findNext(false) },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = UpArrowIcon,
-                                            contentDescription = "Previous match",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { webView?.findNext(true) },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = DownArrowIcon,
-                                            contentDescription = "Next match",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = {
-                                        showFindInPage = false
-                                        findQuery = ""
-                                        webView?.clearMatches()
-                                        findMatchIndex = 0
-                                        findMatchTotal = 0
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close Find in page",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
+                        findInPageBar()
                     }
                 }
             }
@@ -1800,12 +1838,32 @@ class MainActivity : ComponentActivity() {
                 if (currentNavTab == 0) {
                     if (!isBottomAddressBar) {
                         browserControls(false)
+                    } else if (showTabBar) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+                                    isDark = isDark,
+                                    isAmoled = isAmoled,
+                                    elevation = 4.dp
+                                )
+                        ) {
+                            tabsRow()
+                        }
                     }
                 } else {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 2.dp,
-                        shadowElevation = 2.dp
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                                isDark = isDark,
+                                isAmoled = isAmoled,
+                                elevation = 8.dp
+                            )
                     ) {
                         TopAppBar(
                             title = {
@@ -1839,8 +1897,7 @@ class MainActivity : ComponentActivity() {
                             colors = TopAppBarDefaults.topAppBarColors(
                                 containerColor = Color.Transparent,
                                 titleContentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            modifier = Modifier.statusBarsPadding()
+                            )
                         )
                     }
                 }
@@ -1848,18 +1905,32 @@ class MainActivity : ComponentActivity() {
             bottomBar = {
                 Column {
                     miniPlayerStrip()
-                    if (currentNavTab == 0 && isBottomAddressBar) {
-                        browserControls(true)
+                    if (isBottomAddressBar) {
+                        AnimatedVisibility(
+                            visible = showFindInPage,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            findInPageBar()
+                        }
+                        ChocolateBottomBar(
+                            currentNavTab = currentNavTab,
+                            onTabSelected = { currentNavTab = it },
+                            extractedVideoCount = extractedVideos.size,
+                            isDark = isDark,
+                            isAmoled = isAmoled
+                        ) {
+                            addressBarRowContent()
+                        }
+                    } else {
+                        FloatingGlassmorphicBottomBar(
+                            currentNavTab = currentNavTab,
+                            onTabSelected = { currentNavTab = it },
+                            extractedVideoCount = extractedVideos.size,
+                            isDark = isDark,
+                            isAmoled = isAmoled
+                        )
                     }
-                    val isAmoled = themeMode == "amoled"
-                    val isDark = themeMode != "light"
-                    FloatingGlassmorphicBottomBar(
-                        currentNavTab = currentNavTab,
-                        onTabSelected = { currentNavTab = it },
-                        extractedVideoCount = extractedVideos.size,
-                        isDark = isDark,
-                        isAmoled = isAmoled
-                    )
                 }
             }
         ) { paddingValues ->
@@ -2325,7 +2396,8 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 shape = RoundedCornerShape(24.dp),
-                containerColor = MaterialTheme.colorScheme.surface
+                containerColor = Color.Transparent,
+                modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(24.dp), elevation = 12.dp)
             )
         }
 
@@ -2354,7 +2426,8 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = { showPanicDialog = false }) { Text("Cancel") }
                 },
                 shape = RoundedCornerShape(20.dp),
-                containerColor = MaterialTheme.colorScheme.surface
+                containerColor = Color.Transparent,
+                modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(20.dp), elevation = 12.dp, glowColor = MaterialTheme.colorScheme.error)
             )
         }
 
@@ -2364,42 +2437,55 @@ class MainActivity : ComponentActivity() {
                 onDismissRequest = { showTabSwitcher = false },
                 properties = DialogProperties(usePlatformDefaultWidth = false)
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.65f))
                 ) {
                     Scaffold(
+                        containerColor = Color.Transparent,
                         topBar = {
-                            Row(
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .statusBarsPadding()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(onClick = { showTabSwitcher = false }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Close tab switcher")
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "${tabs.size} open ${if (tabs.size == 1) "tab" else "tabs"}",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                                    .refractiveGlass(
+                                        shape = RoundedCornerShape(22.dp),
+                                        isDark = isDark,
+                                        isAmoled = isAmoled,
+                                        elevation = 8.dp
                                     )
-                                }
-                                Button(
-                                    onClick = {
-                                        createNewTab("https://html.duckduckgo.com")
-                                        showTabSwitcher = false
-                                    },
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("New Tab")
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { showTabSwitcher = false }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Close tab switcher")
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "${tabs.size} open ${if (tabs.size == 1) "tab" else "tabs"}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Button(
+                                        onClick = {
+                                            createNewTab("https://html.duckduckgo.com")
+                                            showTabSwitcher = false
+                                        },
+                                        shape = RoundedCornerShape(20.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("New Tab")
+                                    }
                                 }
                             }
                         }
@@ -2418,22 +2504,18 @@ class MainActivity : ComponentActivity() {
                         ) {
                             items(tabs, key = { it.id }) { tab ->
                                 val isActive = tab.id == activeTabId
-                                Card(
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = if (isActive) {
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                                        }
-                                    ),
-                                    border = BorderStroke(
-                                        width = if (isActive) 2.dp else 1.dp,
-                                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                                    ),
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(180.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(18.dp),
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
+                                            borderWidth = if (isActive) 1.5.dp else 1.dp,
+                                            elevation = if (isActive) 12.dp else 4.dp,
+                                            glowColor = if (isActive) MaterialTheme.colorScheme.primary else null
+                                        )
                                         .clickable {
                                             switchTab(tab.id)
                                             showTabSwitcher = false
@@ -2500,8 +2582,12 @@ class MainActivity : ComponentActivity() {
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(95.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                                                .refractiveGlass(
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    isDark = isDark,
+                                                    isAmoled = isAmoled,
+                                                    elevation = 2.dp
+                                                ),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -3062,7 +3148,8 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 shape = RoundedCornerShape(24.dp),
-                containerColor = MaterialTheme.colorScheme.surface
+                containerColor = Color.Transparent,
+                modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(24.dp), elevation = 12.dp, glowColor = MaterialTheme.colorScheme.primary)
             )
         }
     }
@@ -4761,6 +4848,9 @@ private fun UserAgentPresetsDialog(
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
             }
-        }
+        },
+        shape = RoundedCornerShape(24.dp),
+        containerColor = Color.Transparent,
+        modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(24.dp), elevation = 12.dp)
     )
 }

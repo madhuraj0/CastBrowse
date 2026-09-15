@@ -63,10 +63,13 @@ fun DownloadsScreen(onBack: () -> Unit) {
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 2.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .refractiveGlass(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        elevation = 8.dp
+                    )
             ) {
                 TopAppBar(
                     title = {
@@ -108,19 +111,18 @@ fun DownloadsScreen(onBack: () -> Unit) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(56.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(28.dp)
+                            )
                         }
                         Text(
                             "No downloads",
@@ -139,11 +141,13 @@ fun DownloadsScreen(onBack: () -> Unit) {
                         val isCompleted = item.status == DownloadManager.STATUS_SUCCESSFUL
                         val isRunning = item.status == DownloadManager.STATUS_RUNNING
 
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(16.dp),
+                                    elevation = 4.dp
+                                )
                                 .clickable(enabled = isCompleted) {
                                     DownloadHelper.openDownloadedFile(context, item)
                                 }
@@ -154,21 +158,23 @@ fun DownloadsScreen(onBack: () -> Unit) {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isCompleted) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                        else MaterialTheme.colorScheme.surfaceVariant,
-                                        modifier = Modifier.size(40.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .refractiveGlass(
+                                                shape = RoundedCornerShape(10.dp),
+                                                elevation = 2.dp,
+                                                glowColor = if (isCompleted) MaterialTheme.colorScheme.primary else null
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = if (isCompleted) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = if (isCompleted) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp)
+                                        )
                                     }
 
                                     Column(modifier = Modifier.weight(1f)) {

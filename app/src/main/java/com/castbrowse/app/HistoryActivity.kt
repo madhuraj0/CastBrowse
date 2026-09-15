@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -125,10 +126,13 @@ fun HistoryScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 2.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .refractiveGlass(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        elevation = 8.dp
+                    )
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     if (isSearchActive) {
@@ -198,11 +202,13 @@ fun HistoryScreen(
                                 }
                             },
                             actions = {
-                                IconButton(onClick = { isSearchActive = true }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = "Search history"
-                                    )
+                                if (historyItems.isNotEmpty()) {
+                                    IconButton(onClick = { isSearchActive = true }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "Search"
+                                        )
+                                    }
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
@@ -228,31 +234,23 @@ fun HistoryScreen(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.padding(32.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                            modifier = Modifier.size(72.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(36.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(28.dp)
+                            )
                         }
                         Text(
-                            text = if (searchQuery.isNotEmpty()) "No matches found" else "No browsing history",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = if (searchQuery.isNotEmpty()) "Try a different search query" else "Pages you visit will appear here",
+                            text = if (searchQuery.isNotEmpty()) "No matching history" else "No browsing history",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -266,10 +264,15 @@ fun HistoryScreen(
                     // Chrome-like "Clear browsing data..." action card at the very top
                     if (historyItems.isNotEmpty() && !isSearchActive) {
                         item {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surface,
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    .refractiveGlass(
+                                        shape = RoundedCornerShape(16.dp),
+                                        elevation = 4.dp,
+                                        glowColor = MaterialTheme.colorScheme.error
+                                    )
                                     .clickable { showClearDialog = true }
                                     .padding(horizontal = 16.dp, vertical = 14.dp)
                             ) {
@@ -277,12 +280,19 @@ fun HistoryScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Clear",
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(22.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.error),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Clear",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                     Text(
                                         "Clear browsing data...",
                                         style = MaterialTheme.typography.bodyLarge.copy(
@@ -292,10 +302,6 @@ fun HistoryScreen(
                                     )
                                 }
                             }
-                            HorizontalDivider(
-                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
-                                thickness = 0.5.dp
-                            )
                         }
                     }
 
@@ -323,32 +329,34 @@ fun HistoryScreen(
                                 }
                             }
 
-                            Surface(
-                                color = Color.Transparent,
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                                    .refractiveGlass(
+                                        shape = RoundedCornerShape(14.dp),
+                                        elevation = 2.dp
+                                    )
                                     .clickable { onNavigateToUrl(item.url) }
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // Circular Initial / Web Indicator
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                                        modifier = Modifier.size(40.dp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = domain.removePrefix("www.").firstOrNull()?.uppercase() ?: "W",
-                                                fontWeight = FontWeight.Bold,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
+                                        Text(
+                                            text = domain.removePrefix("www.").firstOrNull()?.uppercase() ?: "W",
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
 
                                     Spacer(modifier = Modifier.width(14.dp))
@@ -443,7 +451,8 @@ fun HistoryScreen(
                 }
             },
             shape = RoundedCornerShape(20.dp),
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = Color.Transparent,
+            modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(20.dp), elevation = 12.dp, glowColor = MaterialTheme.colorScheme.error)
         )
     }
 }

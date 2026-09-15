@@ -225,38 +225,26 @@ class CastControlActivity : ComponentActivity() {
 
         Scaffold(
             topBar = {
-                Column {
-                    TopAppBar(
-                        title = {
-                            Text(
-                                "Cast Control Center",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)
-                            )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { finish() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background
+                TopAppBar(
+                    title = {
+                        Text(
+                            "Cast Control Center",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)
                         )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { finish() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent
+                    ),
+                    modifier = Modifier.refractiveGlass(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        elevation = 8.dp
                     )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.secondary,
-                                        Color.Transparent
-                                    )
-                                )
-                            )
-                    )
-                }
+                )
             }
         ) { paddingValues ->
             if (activeDevice == null) {
@@ -302,24 +290,31 @@ class CastControlActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // 1. Device Info Card
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
+                            )
                     ) {
                         Row(
                             modifier = Modifier.padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Connected",
-                                tint = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(32.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.secondary),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Connected",
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                            }
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -348,14 +343,14 @@ class CastControlActivity : ComponentActivity() {
                     val activeUrl = CastSessionManager.activeMediaUrl
                     val activeTitle = CastSessionManager.activeMediaTitle
                     if (!activeUrl.isNullOrEmpty()) {
-                        Card(
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-                            ),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(20.dp),
+                                    elevation = 6.dp,
+                                    glowColor = MaterialTheme.colorScheme.primary
+                                )
                                 .combinedClickable(
                                     onClick = {},
                                     onLongClick = {
@@ -434,13 +429,14 @@ class CastControlActivity : ComponentActivity() {
                         enter = fadeIn(),
                         exit = fadeOut()
                     ) {
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
-                            ),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)),
-                            modifier = Modifier.fillMaxWidth()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(16.dp),
+                                    elevation = 6.dp,
+                                    glowColor = MaterialTheme.colorScheme.secondary
+                                )
                         ) {
                             Row(
                                 modifier = Modifier
@@ -684,15 +680,10 @@ class CastControlActivity : ComponentActivity() {
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(
-                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                            shape = RoundedCornerShape(12.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(12.dp),
+                                            elevation = if (isSelected) 4.dp else 1.dp,
+                                            glowColor = if (isSelected) MaterialTheme.colorScheme.primary else null
                                         )
                                         .clickable {
                                             CastSessionManager.updateAspectRatio(ratio)
@@ -704,7 +695,7 @@ class CastControlActivity : ComponentActivity() {
                                     Text(
                                         text = ratio,
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary
                                         else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -713,13 +704,13 @@ class CastControlActivity : ComponentActivity() {
                     }
 
                     // 6. A/V & Subtitle Sync Controls Card
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
+                            )
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -805,13 +796,13 @@ class CastControlActivity : ComponentActivity() {
                     }
 
                     // 7. External Subtitles (.srt / .vtt) Card
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
+                            )
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -884,13 +875,13 @@ class CastControlActivity : ComponentActivity() {
                     }
 
                     // 8. Queue / Play Next Playlist Card
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
+                            )
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -941,10 +932,13 @@ class CastControlActivity : ComponentActivity() {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     CastSessionManager.mediaQueue.forEachIndexed { index, video ->
                                         val title = video.title.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(video.url) }
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                                            modifier = Modifier.fillMaxWidth()
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .refractiveGlass(
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    elevation = 2.dp
+                                                )
                                         ) {
                                             Row(
                                                 modifier = Modifier
@@ -1090,15 +1084,10 @@ class CastControlActivity : ComponentActivity() {
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(
-                                            if (speedState == speed) MaterialTheme.colorScheme.primaryContainer
-                                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (speedState == speed) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                            shape = RoundedCornerShape(12.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(12.dp),
+                                            elevation = if (speedState == speed) 4.dp else 1.dp,
+                                            glowColor = if (speedState == speed) MaterialTheme.colorScheme.primary else null
                                         )
                                         .clickable {
                                             speedState = speed
@@ -1116,7 +1105,7 @@ class CastControlActivity : ComponentActivity() {
                                     Text(
                                         text = "${speed}x",
                                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (speedState == speed) MaterialTheme.colorScheme.onPrimaryContainer
+                                        color = if (speedState == speed) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }

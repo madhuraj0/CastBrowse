@@ -84,10 +84,13 @@ fun BookmarksScreen(
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                shadowElevation = 2.dp
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .refractiveGlass(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        elevation = 8.dp
+                    )
             ) {
                 if (isSearchActive) {
                     Row(
@@ -193,19 +196,18 @@ fun BookmarksScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(56.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(28.dp)
+                            )
                         }
                         Text(
                             if (searchQuery.isNotEmpty()) "No matching bookmarks" else "No bookmarks",
@@ -221,11 +223,13 @@ fun BookmarksScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(filteredBookmarks, key = { it.url }) { item ->
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(16.dp),
+                                    elevation = 4.dp
+                                )
                                 .clickable { onNavigateToUrl(item.url) }
                         ) {
                             Row(
@@ -235,19 +239,22 @@ fun BookmarksScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    modifier = Modifier.size(40.dp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(10.dp),
+                                            elevation = 2.dp,
+                                            glowColor = MaterialTheme.colorScheme.primary
+                                        ),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Star,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
 
                                 Column(modifier = Modifier.weight(1f)) {

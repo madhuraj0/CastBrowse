@@ -260,33 +260,21 @@ class CastWizardActivity : ComponentActivity() {
 
         Scaffold(
             topBar = {
-                Column {
-                    TopAppBar(
-                        title = { Text("Receiver Setup Wizard", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)) },
-                        navigationIcon = {
-                            IconButton(onClick = { finish() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background
-                        )
+                TopAppBar(
+                    title = { Text("Receiver Setup Wizard", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)) },
+                    navigationIcon = {
+                        IconButton(onClick = { finish() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent
+                    ),
+                    modifier = Modifier.refractiveGlass(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        elevation = 8.dp
                     )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.secondary,
-                                        Color.Transparent
-                                    )
-                                )
-                            )
-                    )
-                }
+                )
             }
         ) { paddingValues ->
             LazyColumn(
@@ -301,14 +289,24 @@ class CastWizardActivity : ComponentActivity() {
                 // 0. VPN Alert Banner (if active)
                 if (isVpnActive) {
                     item {
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
-                            modifier = Modifier.fillMaxWidth()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(18.dp),
+                                    elevation = 6.dp,
+                                    glowColor = MaterialTheme.colorScheme.error
+                                )
                         ) {
                             Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.error),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text("Active VPN Detected", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.error)
@@ -327,13 +325,14 @@ class CastWizardActivity : ComponentActivity() {
                 item {
                     val activeDevice = CastSessionManager.castingDevice
                     if (activeDevice != null) {
-                        Card(
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                            ),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
-                            modifier = Modifier.fillMaxWidth()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(20.dp),
+                                    elevation = 8.dp,
+                                    glowColor = MaterialTheme.colorScheme.primary
+                                )
                         ) {
                             Column(
                                 modifier = Modifier.padding(16.dp),
@@ -342,12 +341,19 @@ class CastWizardActivity : ComponentActivity() {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CheckCircle, 
-                                        contentDescription = "Active Connection", 
-                                        tint = MaterialTheme.colorScheme.secondary, 
-                                        modifier = Modifier.size(32.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.primary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle, 
+                                            contentDescription = "Active Connection", 
+                                            tint = MaterialTheme.colorScheme.secondary, 
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                    }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         val protoName = when (activeDevice.protocol) {
@@ -401,21 +407,31 @@ class CastWizardActivity : ComponentActivity() {
                             }
                         }
                     } else {
-                        Card(
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                            modifier = Modifier.fillMaxWidth()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(20.dp),
+                                    elevation = 4.dp
+                                )
                         ) {
                             Row(
                                 modifier = Modifier.padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info, 
-                                    contentDescription = "No connection", 
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant, 
-                                    modifier = Modifier.size(32.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info, 
+                                        contentDescription = "No connection", 
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant, 
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text("Not Connected", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
@@ -428,15 +444,24 @@ class CastWizardActivity : ComponentActivity() {
 
                 // 2. Smart TV Web Receiver Card (/tv)
                 item {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
+                            )
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(WebIcon, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(24.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.secondary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(WebIcon, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(22.dp))
+                                }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Smart TV Web Receiver", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
@@ -444,10 +469,13 @@ class CastWizardActivity : ComponentActivity() {
                                 }
                             }
                             Spacer(modifier = Modifier.height(10.dp))
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.background,
-                                modifier = Modifier.fillMaxWidth()
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .refractiveGlass(
+                                        shape = RoundedCornerShape(12.dp),
+                                        elevation = 2.dp
+                                    )
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -474,23 +502,30 @@ class CastWizardActivity : ComponentActivity() {
 
                 // 3. Hotspot / Travel Mode Card
                 item {
-                    Card(
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isHotspot) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
-                                            else MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                        modifier = Modifier.fillMaxWidth()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp,
+                                glowColor = if (isHotspot) MaterialTheme.colorScheme.secondary else null
+                            )
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    TetheringIcon,
-                                    contentDescription = null,
-                                    tint = Color.Unspecified,
-                                    modifier = Modifier.size(24.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        TetheringIcon,
+                                        contentDescription = null,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Hotspot / Travel Mode", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
@@ -609,11 +644,13 @@ class CastWizardActivity : ComponentActivity() {
                             CastProtocol.WEB_RECEIVER -> WebIcon
                             CastProtocol.FCAST -> CastIcon
                         }
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(18.dp),
+                                    elevation = 4.dp
+                                )
                                 .clickable {
                                     CastSessionManager.castingDevice = device
                                     CastSessionManager.customFcastPort = device.port
@@ -624,12 +661,19 @@ class CastWizardActivity : ComponentActivity() {
                                 modifier = Modifier.padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = protocolLabel,
-                                    tint = Color.Unspecified,
-                                    modifier = Modifier.size(32.dp)
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = protocolLabel,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(device.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
@@ -668,135 +712,148 @@ class CastWizardActivity : ComponentActivity() {
 
                 // 4. Manual Connection Setup
                 item {
-                    Text("Manual Pairing", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = manualIpText,
-                            onValueChange = { manualIpText = it },
-                            label = { Text("Receiver IP (e.g. 192.168.1.50)") },
-                            shape = RoundedCornerShape(12.dp),
-                            maxLines = 1,
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
                             )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(
-                            onClick = {
-                                try {
-                                    val options = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
-                                        .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
-                                        .build()
-                                    val scanner = com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(context, options)
-                                    scanner.startScan()
-                                        .addOnSuccessListener { barcode ->
-                                            val raw = barcode.rawValue ?: ""
-                                            if (raw.isNotEmpty()) {
-                                                val device = parseFcastQr(raw)
-                                                if (device == null) {
-                                                    Toast.makeText(context, "Could not parse QR code", Toast.LENGTH_LONG).show()
-                                                    return@addOnSuccessListener
-                                                }
-                                                manualIpText = device.ipAddress
-                                                android.util.Log.d("CastWizardActivity", "QR device: ${device.name} ${device.ipAddress}:${device.port}")
-                                                
-                                                lifecycleScope.launch {
-                                                    Toast.makeText(context, "Connecting to ${device.ipAddress}…", Toast.LENGTH_SHORT).show()
-                                                    val reachable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                        try {
-                                                            kotlinx.coroutines.withTimeout(3000) {
-                                                                val socket = java.net.Socket()
-                                                                socket.connect(java.net.InetSocketAddress(device.ipAddress, device.port), 2500)
-                                                                socket.close()
-                                                                true
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Manual Pairing", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
+                            Spacer(modifier = Modifier.height(12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = manualIpText,
+                                    onValueChange = { manualIpText = it },
+                                    label = { Text("Receiver IP (e.g. 192.168.1.50)") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                    )
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            val options = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+                                                .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
+                                                .build()
+                                            val scanner = com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(context, options)
+                                            scanner.startScan()
+                                                .addOnSuccessListener { barcode ->
+                                                    val raw = barcode.rawValue ?: ""
+                                                    if (raw.isNotEmpty()) {
+                                                        val device = parseFcastQr(raw)
+                                                        if (device == null) {
+                                                            Toast.makeText(context, "Could not parse QR code", Toast.LENGTH_LONG).show()
+                                                            return@addOnSuccessListener
+                                                        }
+                                                        manualIpText = device.ipAddress
+                                                        android.util.Log.d("CastWizardActivity", "QR device: ${device.name} ${device.ipAddress}:${device.port}")
+                                                        
+                                                        lifecycleScope.launch {
+                                                            Toast.makeText(context, "Connecting to ${device.ipAddress}…", Toast.LENGTH_SHORT).show()
+                                                            val reachable = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                                try {
+                                                                    kotlinx.coroutines.withTimeout(3000) {
+                                                                        val socket = java.net.Socket()
+                                                                        socket.connect(java.net.InetSocketAddress(device.ipAddress, device.port), 2500)
+                                                                        socket.close()
+                                                                        true
+                                                                    }
+                                                                } catch (e: Exception) {
+                                                                    android.util.Log.e("CastWizardActivity", "QR target unreachable: ${device.ipAddress}:${device.port} — ${e.message}")
+                                                                    false
+                                                                }
                                                             }
-                                                        } catch (e: Exception) {
-                                                            android.util.Log.e("CastWizardActivity", "QR target unreachable: ${device.ipAddress}:${device.port} — ${e.message}")
-                                                            false
+                                                            if (reachable) {
+                                                                CastSessionManager.castingDevice = device
+                                                                CastSessionManager.customFcastPort = device.port
+                                                                CastSessionManager.saveRecentIp(context, device.ipAddress)
+                                                                Toast.makeText(context, "✓ Selected ${device.name}", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                Toast.makeText(context, "Cannot reach ${device.ipAddress}:${device.port}", Toast.LENGTH_LONG).show()
+                                                            }
                                                         }
                                                     }
-                                                    if (reachable) {
-                                                        CastSessionManager.castingDevice = device
-                                                        CastSessionManager.customFcastPort = device.port
-                                                        CastSessionManager.saveRecentIp(context, device.ipAddress)
-                                                        Toast.makeText(context, "✓ Selected ${device.name}", Toast.LENGTH_SHORT).show()
-                                                    } else {
-                                                        Toast.makeText(context, "Cannot reach ${device.ipAddress}:${device.port}", Toast.LENGTH_LONG).show()
-                                                    }
                                                 }
-                                            }
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Scanner unavailable", Toast.LENGTH_SHORT).show()
                                         }
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "Scanner unavailable", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .refractiveGlass(
+                                            shape = RoundedCornerShape(12.dp),
+                                            elevation = 2.dp
+                                        )
+                                ) {
+                                    Icon(QrScannerIcon, contentDescription = "Scan QR", tint = Color.Unspecified)
                                 }
-                            },
-                            modifier = Modifier
-                                .size(56.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Icon(QrScannerIcon, contentDescription = "Scan QR", tint = Color.Unspecified)
-                        }
-                    }
+                            }
 
-                    if (reachabilityStatus != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = reachabilityStatus!!,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (reachabilityStatus!!.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
-                    }
+                            if (reachabilityStatus != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = reachabilityStatus!!,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (reachabilityStatus!!.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                            }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                val ip = manualIpText.trim()
-                                if (ip.isNotEmpty()) {
-                                    val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
-                                    val device = CastDevice("Manual Target", ip, port)
-                                    CastSessionManager.castingDevice = device
-                                    CastSessionManager.customFcastPort = port
-                                    CastSessionManager.saveRecentIp(context, ip)
-                                    recentIps = CastSessionManager.getRecentIps(context)
-                                    Toast.makeText(context, "Selected receiver: $ip:$port", Toast.LENGTH_SHORT).show()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val ip = manualIpText.trim()
+                                        if (ip.isNotEmpty()) {
+                                            val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
+                                            val device = CastDevice("Manual Target", ip, port)
+                                            CastSessionManager.castingDevice = device
+                                            CastSessionManager.customFcastPort = port
+                                            CastSessionManager.saveRecentIp(context, ip)
+                                            recentIps = CastSessionManager.getRecentIps(context)
+                                            Toast.makeText(context, "Selected receiver: $ip:$port", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("Connect")
                                 }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Connect")
-                        }
 
-                        OutlinedButton(
-                            onClick = {
-                                val ip = manualIpText.trim()
-                                if (ip.isNotEmpty()) {
-                                    val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
-                                    lifecycleScope.launch {
-                                        reachabilityStatus = "Pinging $ip:$port..."
-                                        val result = NetworkDiagnostics.testReachability(ip, port)
-                                        reachabilityStatus = if (result.isReachable) "✓ ${result.message}" else "✗ ${result.message}"
-                                    }
-                                } else {
-                                    reachabilityStatus = "Enter an IP address to test"
+                                OutlinedButton(
+                                    onClick = {
+                                        val ip = manualIpText.trim()
+                                        if (ip.isNotEmpty()) {
+                                            val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
+                                            lifecycleScope.launch {
+                                                reachabilityStatus = "Pinging $ip:$port..."
+                                                val result = NetworkDiagnostics.testReachability(ip, port)
+                                                reachabilityStatus = if (result.isReachable) "✓ ${result.message}" else "✗ ${result.message}"
+                                            }
+                                        } else {
+                                            reachabilityStatus = "Enter an IP address to test"
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Test Ping")
                                 }
-                            },
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Test Ping")
+                            }
                         }
                     }
                 }
@@ -808,18 +865,27 @@ class CastWizardActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(4.dp))
                     }
                     items(recentIps) { ip ->
-                        OutlinedCard(
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(14.dp),
+                                    elevation = 3.dp
+                                )
                                 .clickable { manualIpText = ip }
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "History", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 1.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "History", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
+                                }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Text(ip, style = MaterialTheme.typography.bodyMedium)
                             }
@@ -829,31 +895,42 @@ class CastWizardActivity : ComponentActivity() {
 
                 // 6. Configuration Ports settings
                 item {
-                    Text("Settings", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = fcastPortText,
-                        onValueChange = { 
-                            fcastPortText = it
-                            it.toIntOrNull()?.let { port ->
-                                CastSessionManager.customFcastPort = port
-                            }
-                        },
-                        label = { Text("Default TCP Port") },
-                        shape = RoundedCornerShape(12.dp),
-                        maxLines = 1,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            platformImeOptions = androidx.compose.ui.text.input.PlatformImeOptions(
-                                privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning"
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
                             )
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                        )
-                    )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Settings", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = fcastPortText,
+                                onValueChange = { 
+                                    fcastPortText = it
+                                    it.toIntOrNull()?.let { port ->
+                                        CastSessionManager.customFcastPort = port
+                                    }
+                                },
+                                label = { Text("Default TCP Port") },
+                                shape = RoundedCornerShape(12.dp),
+                                maxLines = 1,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    platformImeOptions = androidx.compose.ui.text.input.PlatformImeOptions(
+                                        privateImeOptions = "com.google.android.inputmethod.latin.noPersonalizedLearning"
+                                    )
+                                ),
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                                )
+                            )
+                        }
+                    }
                 }
                 
                 item { Spacer(modifier = Modifier.height(24.dp)) }
