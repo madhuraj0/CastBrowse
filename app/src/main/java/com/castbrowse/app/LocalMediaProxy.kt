@@ -700,10 +700,11 @@ object LocalMediaProxy {
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CastBrowse Web Receiver</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
   body, html { width: 100%; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
-  #player-container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #player-container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+
   #idle-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at center, #181c24 0%, #08090c 100%); z-index: 10; text-align: center; padding: 24px; }
   .logo { font-size: 3.2rem; font-weight: 900; letter-spacing: -1px; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px; }
   .status-pill { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 9999px; padding: 6px 18px; font-size: 1rem; color: #93c5fd; margin-bottom: 24px; }
@@ -711,10 +712,56 @@ object LocalMediaProxy {
   @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
   .instructions { color: rgba(255,255,255,0.7); font-size: 1.25rem; max-width: 600px; line-height: 1.6; }
   .instructions b { color: #fff; }
-  #osd { position: absolute; bottom: 40px; left: 40px; right: 40px; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 18px 24px; z-index: 20; opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
-  #osd.show { opacity: 1; }
-  #osd-title { font-size: 1.4rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
-  #osd-time { font-size: 0.95rem; color: #94a3b8; font-family: monospace; }
+
+  /* Buffering Spinner */
+  #spinner { display: none; position: absolute; width: 64px; height: 64px; border: 5px solid rgba(255,255,255,0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 1s linear infinite; z-index: 15; pointer-events: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* OSD Container */
+  #osd-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 32px 40px; pointer-events: none; opacity: 0; transition: opacity 0.35s ease; z-index: 20; background: linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 22%, transparent 70%, rgba(0,0,0,0.85) 100%); }
+  #osd-overlay.show { opacity: 1; pointer-events: auto; }
+
+  /* Top Bar */
+  .osd-top { display: flex; justify-content: space-between; align-items: center; }
+  .top-left { display: flex; align-items: center; gap: 14px; }
+  .brand-badge { font-weight: 800; font-size: 1.1rem; color: #60a5fa; background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3); padding: 4px 12px; border-radius: 8px; }
+  #osd-title { font-size: 1.35rem; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70vw; }
+  .top-right { display: flex; align-items: center; gap: 10px; }
+
+  /* Bottom Controls Box */
+  .osd-bottom { display: flex; flex-direction: column; gap: 14px; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 16px 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+
+  /* Seek / Progress Bar */
+  .seek-bar-container { position: relative; width: 100%; height: 14px; display: flex; align-items: center; cursor: pointer; border-radius: 7px; outline: none; }
+  .seek-track { position: relative; width: 100%; height: 6px; background: rgba(255,255,255,0.2); border-radius: 4px; overflow: hidden; transition: height 0.15s; }
+  .seek-bar-container:hover .seek-track, .seek-bar-container:focus .seek-track { height: 9px; }
+  .seek-buffer { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: rgba(255,255,255,0.35); border-radius: 4px; }
+  .seek-progress { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 4px; }
+  .seek-thumb { position: absolute; left: 0%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px rgba(0,0,0,0.6); opacity: 0; transition: opacity 0.15s; pointer-events: none; }
+  .seek-bar-container:hover .seek-thumb, .seek-bar-container:focus .seek-thumb { opacity: 1; }
+
+  /* Controls Row */
+  .controls-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .controls-left, .controls-right { display: flex; align-items: center; gap: 12px; }
+
+  /* TV Buttons with High-Visibility D-Pad Focus */
+  .ctrl-btn { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 1.05rem; font-weight: 600; border-radius: 12px; height: 44px; min-width: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; outline: none; transition: all 0.2s ease; }
+  .ctrl-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.3); }
+
+  /* Remote D-Pad Focus Indicator for 10-foot TV experience */
+  .ctrl-btn:focus, .seek-bar-container:focus, .remote-focusable:focus {
+    outline: none !important;
+    background: rgba(56, 189, 248, 0.25) !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 0 3px #38bdf8, 0 0 20px rgba(56, 189, 248, 0.6) !important;
+    transform: scale(1.08);
+  }
+
+  .ctrl-btn-primary { background: #0284c7; border-color: #38bdf8; font-size: 1.25rem; min-width: 52px; height: 46px; }
+  .ctrl-btn-primary:hover { background: #0369a1; }
+
+  #osd-time { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.95rem; color: #cbd5e1; padding: 0 6px; }
+  .remote-hint { font-size: 0.78rem; color: rgba(255,255,255,0.45); text-align: center; }
 </style>
 </head>
 <body>
@@ -724,29 +771,123 @@ object LocalMediaProxy {
     <div class="status-pill"><div class="status-dot"></div> Web Receiver Ready</div>
     <p class="instructions">Keep this browser tab open on your TV.<br>In CastBrowse, select <b>Web Receiver</b> or cast any video link to start watching.</p>
   </div>
+
+  <div id="spinner"></div>
   <img id="photo" style="display:none; width:100%; height:100%; object-fit:contain; background:#000; position:absolute; inset:0; z-index:5;" alt="Photo" />
   <video id="video" playsinline webkit-playsinline></video>
-  <div id="osd">
-    <div id="osd-title">Media Stream</div>
-    <div id="osd-time">00:00 / 00:00</div>
+
+  <!-- Complete TV Receiver Player UI (OSD) -->
+  <div id="osd-overlay">
+    <div class="osd-top">
+      <div class="top-left">
+        <div class="brand-badge">CastBrowse TV</div>
+        <div id="osd-title">Media Stream</div>
+      </div>
+      <div class="top-right">
+        <button id="btn-fullscreen-top" class="ctrl-btn remote-focusable" tabindex="0" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
+          <span id="fs-top-icon">⛶</span> Fullscreen
+        </button>
+      </div>
+    </div>
+
+    <div class="osd-bottom">
+      <!-- Seek Bar -->
+      <div id="seek-container" class="seek-bar-container remote-focusable" tabindex="0" role="slider" aria-label="Video seek slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div class="seek-track">
+          <div id="seek-buffer" class="seek-buffer"></div>
+          <div id="seek-progress" class="seek-progress"></div>
+        </div>
+        <div id="seek-thumb" class="seek-thumb"></div>
+      </div>
+
+      <!-- Control Buttons Row -->
+      <div class="controls-row">
+        <div class="controls-left">
+          <button id="btn-play" class="ctrl-btn ctrl-btn-primary remote-focusable" tabindex="0" title="Play / Pause (OK / Space)" aria-label="Play / Pause">
+            <span id="play-icon">▶</span>
+          </button>
+          <button id="btn-rw" class="ctrl-btn remote-focusable" tabindex="0" title="Rewind 10s (Left Arrow)" aria-label="Rewind 10s">
+            ⏪ 10s
+          </button>
+          <button id="btn-ff" class="ctrl-btn remote-focusable" tabindex="0" title="Forward 10s (Right Arrow)" aria-label="Forward 10s">
+            10s ⏩
+          </button>
+          <div id="osd-time">00:00 / 00:00</div>
+        </div>
+
+        <div class="controls-right">
+          <button id="btn-aspect" class="ctrl-btn remote-focusable" tabindex="0" title="Cycle Aspect Ratio" aria-label="Cycle Aspect Ratio">
+            📐 <span id="aspect-label">Fit</span>
+          </button>
+          <button id="btn-mute" class="ctrl-btn remote-focusable" tabindex="0" title="Mute / Unmute" aria-label="Mute / Unmute">
+            <span id="mute-icon">🔊</span>
+          </button>
+          <button id="btn-fullscreen" class="ctrl-btn remote-focusable" tabindex="0" title="Toggle Fullscreen (F)" aria-label="Toggle Fullscreen">
+            <span id="fs-icon">⛶</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="remote-hint">Remote: OK: Play/Pause • Arrows: Seek/Nav • F / Green: Fullscreen • Back: Hide UI</div>
+    </div>
   </div>
 </div>
+
 <script>
   const video = document.getElementById('video');
   const photo = document.getElementById('photo');
   const idleScreen = document.getElementById('idle-screen');
-  const osd = document.getElementById('osd');
+  const spinner = document.getElementById('spinner');
+
+  const osdOverlay = document.getElementById('osd-overlay');
   const osdTitle = document.getElementById('osd-title');
   const osdTime = document.getElementById('osd-time');
+
+  const seekContainer = document.getElementById('seek-container');
+  const seekProgress = document.getElementById('seek-progress');
+  const seekBuffer = document.getElementById('seek-buffer');
+  const seekThumb = document.getElementById('seek-thumb');
+
+  const btnPlay = document.getElementById('btn-play');
+  const playIcon = document.getElementById('play-icon');
+  const btnRw = document.getElementById('btn-rw');
+  const btnFf = document.getElementById('btn-ff');
+  const btnAspect = document.getElementById('btn-aspect');
+  const aspectLabel = document.getElementById('aspect-label');
+  const btnMute = document.getElementById('btn-mute');
+  const muteIcon = document.getElementById('mute-icon');
+  const btnFullscreen = document.getElementById('btn-fullscreen');
+  const fsIcon = document.getElementById('fs-icon');
+  const btnFullscreenTop = document.getElementById('btn-fullscreen-top');
+  const fsTopIcon = document.getElementById('fs-top-icon');
 
   let currentUrl = '';
   let lastCommandVersion = -1;
   let osdTimeout = null;
+  const aspectModes = ['contain', 'cover', 'fill'];
+  let currentAspectIdx = 0;
 
   function showOsd() {
-    osd.classList.add('show');
+    osdOverlay.classList.add('show');
     clearTimeout(osdTimeout);
-    osdTimeout = setTimeout(() => osd.classList.remove('show'), 3500);
+    if (!video.paused && video.src && !video.ended) {
+      osdTimeout = setTimeout(() => {
+        // If an element within OSD has active focus from TV remote, do not hide abruptly
+        if (!osdOverlay.contains(document.activeElement) || document.activeElement === document.body) {
+          osdOverlay.classList.remove('show');
+        } else {
+          osdTimeout = setTimeout(() => osdOverlay.classList.remove('show'), 5000);
+        }
+      }, 4500);
+    }
+  }
+
+  function hideOsd() {
+    clearTimeout(osdTimeout);
+    osdOverlay.classList.remove('show');
+    if (document.activeElement && osdOverlay.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
   }
 
   function formatTime(sec) {
@@ -758,21 +899,227 @@ object LocalMediaProxy {
     return h > 0 ? pad(h) + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
   }
 
-  video.addEventListener('timeupdate', () => {
+  function updateProgressBar() {
+    if (!video.duration || isNaN(video.duration)) {
+      seekProgress.style.width = '0%';
+      seekThumb.style.left = '0%';
+      osdTime.textContent = formatTime(video.currentTime) + ' / 00:00';
+      return;
+    }
+    const percent = Math.min(100, Math.max(0, (video.currentTime / video.duration) * 100));
+    seekProgress.style.width = percent + '%';
+    seekThumb.style.left = percent + '%';
+    seekContainer.setAttribute('aria-valuenow', Math.round(percent));
     osdTime.textContent = formatTime(video.currentTime) + ' / ' + formatTime(video.duration);
+
+    if (video.buffered && video.buffered.length > 0) {
+      const buffEnd = video.buffered.end(video.buffered.length - 1);
+      const buffPercent = Math.min(100, (buffEnd / video.duration) * 100);
+      seekBuffer.style.width = buffPercent + '%';
+    }
+  }
+
+  function togglePlay() {
+    if (video.paused || video.ended) {
+      video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
+  }
+
+  function toggleMute() {
+    video.muted = !video.muted;
+    muteIcon.textContent = video.muted ? '🔇' : '🔊';
+  }
+
+  function cycleAspect() {
+    currentAspectIdx = (currentAspectIdx + 1) % aspectModes.length;
+    const mode = aspectModes[currentAspectIdx];
+    video.style.objectFit = mode;
+    aspectLabel.textContent = mode === 'contain' ? 'Fit' : mode === 'cover' ? 'Zoom' : 'Fill';
+  }
+
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+  }
+
+  function toggleFullscreen() {
+    const doc = document;
+    const elem = document.documentElement;
+    if (!isFullscreen()) {
+      if (elem.requestFullscreen) {
+        elem.requestFullscreen().catch(() => {});
+      } else if (elem.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      } else if (elem.mozRequestFullScreen) {
+        elem.mozRequestFullScreen();
+      } else if (elem.msRequestFullscreen) {
+        elem.msRequestFullscreen();
+      }
+    } else {
+      if (doc.exitFullscreen) {
+        doc.exitFullscreen().catch(() => {});
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+      } else if (doc.mozCancelFullScreen) {
+        doc.mozCancelFullScreen();
+      } else if (doc.msExitFullscreen) {
+        doc.msExitFullscreen();
+      }
+    }
+  }
+
+  function updateFullscreenUi() {
+    const fs = isFullscreen();
+    fsIcon.textContent = fs ? '🗗' : '⛶';
+    fsTopIcon.textContent = fs ? '🗗' : '⛶';
+    btnFullscreen.title = fs ? 'Exit Fullscreen' : 'Enter Fullscreen';
+    btnFullscreenTop.title = fs ? 'Exit Fullscreen' : 'Enter Fullscreen';
+  }
+
+  ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(evt => {
+    document.addEventListener(evt, updateFullscreenUi);
   });
 
-  video.addEventListener('play', () => { idleScreen.style.display = 'none'; showOsd(); });
-  video.addEventListener('pause', () => showOsd());
+  // Controls Event Listeners
+  btnPlay.addEventListener('click', () => { togglePlay(); showOsd(); });
+  btnRw.addEventListener('click', () => { video.currentTime = Math.max(0, video.currentTime - 10); showOsd(); });
+  btnFf.addEventListener('click', () => { video.currentTime = Math.min(video.duration || 999999, video.currentTime + 10); showOsd(); });
+  btnMute.addEventListener('click', () => { toggleMute(); showOsd(); });
+  btnAspect.addEventListener('click', () => { cycleAspect(); showOsd(); });
+  btnFullscreen.addEventListener('click', () => { toggleFullscreen(); showOsd(); });
+  btnFullscreenTop.addEventListener('click', () => { toggleFullscreen(); showOsd(); });
+
+  seekContainer.addEventListener('click', (e) => {
+    if (!video.duration || isNaN(video.duration)) return;
+    const rect = seekContainer.getBoundingClientRect();
+    const pos = (e.clientX - rect.left) / rect.width;
+    video.currentTime = Math.max(0, Math.min(video.duration, pos * video.duration));
+    showOsd();
+  });
+
+  // Video State Updates
+  video.addEventListener('timeupdate', updateProgressBar);
+  video.addEventListener('play', () => {
+    playIcon.textContent = '❚❚';
+    idleScreen.style.display = 'none';
+    showOsd();
+  });
+  video.addEventListener('pause', () => {
+    playIcon.textContent = '▶';
+    showOsd();
+  });
+  video.addEventListener('waiting', () => { spinner.style.display = 'block'; });
+  video.addEventListener('playing', () => { spinner.style.display = 'none'; });
+  video.addEventListener('canplay', () => { spinner.style.display = 'none'; });
+
   document.addEventListener('mousemove', () => showOsd());
+  document.addEventListener('touchstart', () => showOsd(), { passive: true });
+
+  // Remote Navigation (D-Pad, Media Keys, TV remotes)
+  const navItems = Array.from(document.querySelectorAll('.remote-focusable'));
+
   document.addEventListener('keydown', (e) => {
     showOsd();
-    if (e.key === ' ' || e.key === 'MediaPlayPause') {
-      video.paused ? video.play() : video.pause();
-    } else if (e.key === 'ArrowRight') {
-      video.currentTime += 10;
+    const active = document.activeElement;
+    const keyCode = e.keyCode || e.which;
+
+    // Fullscreen key (F or Green button 404/170)
+    if (e.key === 'f' || e.key === 'F' || keyCode === 404 || keyCode === 170) {
+      toggleFullscreen();
+      return;
+    }
+
+    // Mute key (M or Yellow button)
+    if (e.key === 'm' || e.key === 'M' || keyCode === 405) {
+      toggleMute();
+      return;
+    }
+
+    // Media keys
+    if (e.key === 'MediaPlay' || keyCode === 415 || keyCode === 250) {
+      video.play().catch(() => {});
+      return;
+    }
+    if (e.key === 'MediaPause' || keyCode === 19) {
+      video.pause();
+      return;
+    }
+    if (e.key === ' ' || e.key === 'MediaPlayPause' || keyCode === 10252) {
+      togglePlay();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'MediaStop' || keyCode === 413) {
+      video.pause();
+      video.currentTime = 0;
+      return;
+    }
+    if (e.key === 'MediaRewind' || keyCode === 412 || keyCode === 227) {
+      video.currentTime = Math.max(0, video.currentTime - 15);
+      return;
+    }
+    if (e.key === 'MediaFastForward' || keyCode === 417 || keyCode === 228) {
+      video.currentTime = Math.min(video.duration || 999999, video.currentTime + 15);
+      return;
+    }
+
+    // Back / Return (Escape, Tizen 10009, webOS 461)
+    if (e.key === 'Escape' || keyCode === 10009 || keyCode === 461 || keyCode === 27) {
+      if (isFullscreen()) {
+        toggleFullscreen();
+      } else {
+        hideOsd();
+      }
+      return;
+    }
+
+    // D-Pad navigation
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (active === seekContainer) {
+        btnFullscreenTop.focus();
+      } else if (navItems.includes(active)) {
+        seekContainer.focus();
+      } else {
+        btnPlay.focus();
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (active === btnFullscreenTop) {
+        seekContainer.focus();
+      } else if (active === seekContainer) {
+        btnPlay.focus();
+      } else if (!navItems.includes(active)) {
+        btnPlay.focus();
+      }
     } else if (e.key === 'ArrowLeft') {
-      video.currentTime = Math.max(0, video.currentTime - 10);
+      if (active === seekContainer) {
+        e.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - 10);
+      } else if (navItems.includes(active)) {
+        e.preventDefault();
+        const curIdx = navItems.indexOf(active);
+        if (curIdx > 0) navItems[curIdx - 1].focus();
+      } else {
+        video.currentTime = Math.max(0, video.currentTime - 10);
+      }
+    } else if (e.key === 'ArrowRight') {
+      if (active === seekContainer) {
+        e.preventDefault();
+        video.currentTime = Math.min(video.duration || 999999, video.currentTime + 10);
+      } else if (navItems.includes(active)) {
+        e.preventDefault();
+        const curIdx = navItems.indexOf(active);
+        if (curIdx < navItems.length - 1) navItems[curIdx + 1].focus();
+      } else {
+        video.currentTime = Math.min(video.duration || 999999, video.currentTime + 10);
+      }
+    } else if (e.key === 'Enter' || keyCode === 13) {
+      if (!navItems.includes(active)) {
+        e.preventDefault();
+        togglePlay();
+      }
     }
   });
 
@@ -803,11 +1150,10 @@ object LocalMediaProxy {
             document.body.style.background = '#000000';
             document.body.style.cursor = 'none';
             idleScreen.style.display = 'none';
-            osd.style.display = 'none';
+            hideOsd();
             photo.style.display = 'none';
             video.style.opacity = '0';
           } else {
-            osd.style.display = 'block';
             video.style.opacity = '1';
             document.body.style.cursor = 'auto';
           }
@@ -822,6 +1168,7 @@ object LocalMediaProxy {
           }
           if (data.aspectRatio) {
             video.style.objectFit = data.aspectRatio === 'Fill' ? 'fill' : data.aspectRatio === 'Zoom' ? 'cover' : 'contain';
+            aspectLabel.textContent = data.aspectRatio;
           }
           if (typeof data.loop === 'boolean') {
             video.loop = data.loop;

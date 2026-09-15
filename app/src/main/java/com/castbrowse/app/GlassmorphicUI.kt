@@ -453,13 +453,14 @@ fun Modifier.glassBackdropPlate(
                             setFloatUniform("size", w, h)
                             setFloatUniform("offset", 0f, 0f)
                             setFloatUniform("cornerRadii", cornerRadius, cornerRadius, cornerRadius, cornerRadius)
-                            setFloatUniform("refractionHeight", with(density) { 14.dp.toPx() })
-                            setFloatUniform("refractionAmount", with(density) { -10.dp.toPx() })
-                            setFloatUniform("depthEffect", 0.85f)
-                            setFloatUniform("chromaticAberration", 0.75f)
+                            // Option 1: Subtle Liquid Glass (refined realistic edge bevel, zero distortion)
+                            setFloatUniform("refractionHeight", with(density) { 5.dp.toPx() })
+                            setFloatUniform("refractionAmount", with(density) { -2.5.dp.toPx() })
+                            setFloatUniform("depthEffect", 0.35f)
+                            setFloatUniform("chromaticAberration", 0.12f)
                         }
                         val refractionEffect = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
-                        val blurEffect = android.graphics.RenderEffect.createBlurEffect(16f, 16f, android.graphics.Shader.TileMode.CLAMP)
+                        val blurEffect = android.graphics.RenderEffect.createBlurEffect(14f, 14f, android.graphics.Shader.TileMode.CLAMP)
                         renderEffect = android.graphics.RenderEffect.createChainEffect(refractionEffect, blurEffect).asComposeRenderEffect()
                     }
                 } catch (_: Throwable) {

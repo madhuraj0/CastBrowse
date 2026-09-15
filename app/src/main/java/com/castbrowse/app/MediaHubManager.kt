@@ -1,7 +1,9 @@
 package com.castbrowse.app
 
 import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -25,7 +27,8 @@ data class DeviceAudioItem(
     val artist: String = "Unknown Artist",
     val album: String = "Unknown Album",
     val durationMs: Long = 0L,
-    val size: Long = 0L
+    val size: Long = 0L,
+    val albumId: Long = -1L
 )
 
 data class DevicePhotoItem(
@@ -39,6 +42,8 @@ object MediaHubManager {
 
     // LRU Cache for photo thumbnails to keep scrolling fast and light
     private val thumbnailCache = object : LruCache<String, ImageBitmap>(80) {}
+    // LRU Cache for music album art
+    private val albumArtCache = object : LruCache<String, ImageBitmap>(80) {}
 
     fun formatDuration(ms: Long): String {
         if (ms <= 0) return "--:--"
@@ -165,6 +170,174 @@ object MediaHubManager {
             Log.e(TAG, "Error loading photos from folder $treeUri: ${e.message}", e)
         }
         photos
+    }
+
+    suspend fun loadAlbumArt(context: Context, item: DeviceAudioItem): ImageBitmap? = withContext(Dispatchers.IO) {
+        val key = item.uri.toString()
+        albumArtCache.get(key)?.let { return@withContext it }
+
+        var bitmap: Bitmap? = null
+
+        // 1. Try MediaStore album art URI if albumId > 0
+        if (item.albumId > 0) {
+            try {
+                val albumArtUri = ContentUris.withAppendedId(
+                    Uri.parse("content://media/external/audio/albumart"),
+                    item.albumId
+                )
+                context.contentResolver.openInputStream(albumArtUri)?.use { stream ->
+                    bitmap = BitmapFactory.decodeStream(stream)
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Try MediaMetadataRetriever embedded picture from file URI
+        if (bitmap == null) {
+            try {
+                val mmr = MediaMetadataRetriever()
+                mmr.setDataSource(context, item.uri)
+                val picBytes = mmr.embeddedPicture
+                if (picBytes != null && picBytes.isNotEmpty()) {
+                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, options)
+                    options.inSampleSize = calculateInSampleSize(options, 200, 200)
+                    options.inJustDecodeBounds = false
+                    bitmap = BitmapFactory.decodeByteArray(picBytes, 0, picBytes.size, options)
+                }
+                mmr.release()
+            } catch (_: Exception) {}
+        }
+
+        // 3. On Android 10+ (Q+), try contentResolver.loadThumbnail
+        if (bitmap == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                bitmap = context.contentResolver.loadThumbnail(item.uri, Size(200, 200), null)
+            } catch (_: Exception) {}
+        }
+
+        val resolvedBmp = bitmap
+        if (resolvedBmp != null) {
+            val imageBitmap = resolvedBmp.asImageBitmap()
+            albumArtCache.put(key, imageBitmap)
+            imageBitmap
+        } else {
+            null
+        }
+    }
+
+    suspend fun scanDeviceAudio(context: Context): List<DeviceAudioItem> = withContext(Dispatchers.IO) {
+        val audioList = mutableListOf<DeviceAudioItem>()
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        }
+
+        val projection = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.TITLE,
+            MediaStore.Audio.Media.ARTIST,
+            MediaStore.Audio.Media.ALBUM,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.SIZE,
+            MediaStore.Audio.Media.ALBUM_ID
+        )
+
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'"
+        val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
+
+        try {
+            context.contentResolver.query(
+                collection,
+                projection,
+                selection,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                val albumIdColumn = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
+
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idColumn)
+                    val contentUri = ContentUris.withAppendedId(collection, id)
+                    val title = cursor.getString(titleColumn) ?: "Unknown Track"
+                    val artist = cursor.getString(artistColumn) ?: "Unknown Artist"
+                    val album = cursor.getString(albumColumn) ?: "Unknown Album"
+                    val duration = cursor.getLong(durationColumn)
+                    val size = cursor.getLong(sizeColumn)
+                    val albumId = if (albumIdColumn >= 0) cursor.getLong(albumIdColumn) else -1L
+
+                    audioList.add(
+                        DeviceAudioItem(
+                            uri = contentUri,
+                            title = title,
+                            artist = if (artist == "<unknown>") "Unknown Artist" else artist,
+                            album = if (album == "<unknown>") "Unknown Album" else album,
+                            durationMs = duration,
+                            size = size,
+                            albumId = albumId
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error querying MediaStore audio: ${e.message}", e)
+        }
+        audioList
+    }
+
+    suspend fun loadAudiosFromFolder(context: Context, treeUri: Uri): List<DeviceAudioItem> = withContext(Dispatchers.IO) {
+        val audioList = mutableListOf<DeviceAudioItem>()
+        try {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+            } catch (_: Exception) {}
+
+            val docId = DocumentsContract.getTreeDocumentId(treeUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE
+            )
+
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+                while (cursor.moveToNext()) {
+                    val mime = if (mimeCol >= 0) cursor.getString(mimeCol) ?: "" else ""
+                    val name = if (nameCol >= 0) cursor.getString(nameCol) ?: "Audio" else "Audio"
+                    val isAudio = mime.startsWith("audio/") ||
+                        name.endsWith(".mp3", ignoreCase = true) ||
+                        name.endsWith(".m4a", ignoreCase = true) ||
+                        name.endsWith(".flac", ignoreCase = true) ||
+                        name.endsWith(".wav", ignoreCase = true) ||
+                        name.endsWith(".aac", ignoreCase = true) ||
+                        name.endsWith(".ogg", ignoreCase = true)
+
+                    if (isAudio) {
+                        val fileDocId = cursor.getString(idCol)
+                        val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, fileDocId)
+                        val audioItem = getAudioItemFromUri(context, fileUri)
+                        audioList.add(audioItem)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scanning audio from folder: ${e.message}", e)
+        }
+        audioList
     }
 
     suspend fun loadThumbnail(context: Context, uri: Uri): ImageBitmap? = withContext(Dispatchers.IO) {

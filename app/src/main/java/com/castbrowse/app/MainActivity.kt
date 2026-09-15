@@ -3,6 +3,7 @@ package com.castbrowse.app
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -975,6 +976,92 @@ class MainActivity : ComponentActivity() {
         }
 
         val pickedAudios = remember { mutableStateListOf<DeviceAudioItem>() }
+
+        val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+        var hasAudioPermission by remember {
+            mutableStateOf(
+                androidx.core.content.ContextCompat.checkSelfPermission(context, audioPermission) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            )
+        }
+
+        val audioPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            hasAudioPermission = isGranted
+            if (isGranted) {
+                lifecycleScope.launch {
+                    val prefs = context.getSharedPreferences("castbrowse_prefs", Context.MODE_PRIVATE)
+                    val savedFolder = prefs.getString("audio_folder_uri", null)
+                    val songs = if (savedFolder != null) {
+                        MediaHubManager.loadAudiosFromFolder(context, Uri.parse(savedFolder))
+                    } else {
+                        MediaHubManager.scanDeviceAudio(context)
+                    }
+                    if (songs.isNotEmpty()) {
+                        songs.forEach { song ->
+                            if (pickedAudios.none { it.uri == song.uri }) {
+                                pickedAudios.add(song)
+                            }
+                        }
+                        Toast.makeText(context, "Loaded ${songs.size} audio tracks", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } else {
+                Toast.makeText(context, "Audio storage permission is required to list music files", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        val pickAudioFolderLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocumentTree()
+        ) { treeUri: Uri? ->
+            if (treeUri != null) {
+                lifecycleScope.launch {
+                    Toast.makeText(context, "Scanning folder for music...", Toast.LENGTH_SHORT).show()
+                    val audios = MediaHubManager.loadAudiosFromFolder(context, treeUri)
+                    if (audios.isNotEmpty()) {
+                        audios.forEach { audio ->
+                            if (pickedAudios.none { it.uri == audio.uri }) {
+                                pickedAudios.add(audio)
+                            }
+                        }
+                        context.getSharedPreferences("castbrowse_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .putString("audio_folder_uri", treeUri.toString())
+                            .apply()
+                        Toast.makeText(context, "Loaded ${audios.size} song(s) from folder", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "No audio files found in selected folder", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
+        // Auto-load audio tracks if permission is already granted on launch
+        LaunchedEffect(hasAudioPermission) {
+            if (hasAudioPermission && pickedAudios.isEmpty()) {
+                val prefs = context.getSharedPreferences("castbrowse_prefs", Context.MODE_PRIVATE)
+                val savedFolder = prefs.getString("audio_folder_uri", null)
+                val songs = if (savedFolder != null) {
+                    MediaHubManager.loadAudiosFromFolder(context, Uri.parse(savedFolder))
+                } else {
+                    MediaHubManager.scanDeviceAudio(context)
+                }
+                if (songs.isNotEmpty()) {
+                    songs.forEach { song ->
+                        if (pickedAudios.none { it.uri == song.uri }) {
+                            pickedAudios.add(song)
+                        }
+                    }
+                }
+            }
+        }
+
         val pickAudiosLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.GetMultipleContents()
         ) { uris: List<Uri> ->
@@ -2210,6 +2297,27 @@ class MainActivity : ComponentActivity() {
                         photoSlideshowList = CastSessionManager.photoSlideshowList,
                         onPickVideo = { pickVideoLauncher.launch("video/*") },
                         onPickAudio = { pickAudiosLauncher.launch("audio/*") },
+                        onPickAudioFolder = { pickAudioFolderLauncher.launch(null) },
+                        onScanDeviceAudio = {
+                            lifecycleScope.launch {
+                                Toast.makeText(context, "Scanning device for audio...", Toast.LENGTH_SHORT).show()
+                                val scanned = MediaHubManager.scanDeviceAudio(context)
+                                if (scanned.isNotEmpty()) {
+                                    scanned.forEach { song ->
+                                        if (pickedAudios.none { it.uri == song.uri }) {
+                                            pickedAudios.add(song)
+                                        }
+                                    }
+                                    Toast.makeText(context, "Loaded ${scanned.size} audio tracks", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "No audio tracks found on device", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onRequestAudioPermission = {
+                            audioPermissionLauncher.launch(audioPermission)
+                        },
+                        hasAudioPermission = hasAudioPermission,
                         onPickPhotos = { pickPhotosLauncher.launch("image/*") },
                         onPickFolder = { pickFolderLauncher.launch(null) },
                         onCastVideo = { url, title ->
@@ -3208,6 +3316,10 @@ private fun MediaHubPage(
     photoSlideshowList: List<DevicePhotoItem>,
     onPickVideo: () -> Unit,
     onPickAudio: () -> Unit,
+    onPickAudioFolder: () -> Unit = {},
+    onScanDeviceAudio: () -> Unit = {},
+    onRequestAudioPermission: () -> Unit = {},
+    hasAudioPermission: Boolean = false,
     onPickPhotos: () -> Unit,
     onPickFolder: () -> Unit,
     onCastVideo: (url: String, title: String) -> Unit,
@@ -3604,48 +3716,38 @@ private fun MediaHubPage(
                     }
 
                     item {
-                        // Pick Audio button & Clear button
+                        // Action row: Folder, Scan, Pick Files, Clear
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedCard(
-                                onClick = onPickAudio,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.weight(1f),
-                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
-                                colors = CardDefaults.outlinedCardColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f)
-                                )
+                            Button(
+                                onClick = onPickAudioFolder,
+                                modifier = Modifier.weight(1.1f),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = MusicIcon,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "Pick Audio Tracks",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
+                                Text("📁 Folder", fontWeight = FontWeight.Bold)
                             }
-
+                            OutlinedButton(
+                                onClick = onScanDeviceAudio,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("🔄 Scan", fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = onPickAudio,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("➕ Files", fontWeight = FontWeight.Bold)
+                            }
                             if (pickedAudios.isNotEmpty()) {
                                 OutlinedButton(
                                     onClick = onClearAudios,
-                                    shape = RoundedCornerShape(14.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp)
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Delete,
@@ -3658,43 +3760,102 @@ private fun MediaHubPage(
                         }
                     }
 
-                    if (pickedAudios.isEmpty()) {
+                    if (!hasAudioPermission) {
                         item {
-                            Box(
+                            Card(
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 32.dp),
-                                contentAlignment = Alignment.Center
+                                    .padding(vertical = 12.dp)
                             ) {
                                 Column(
+                                    modifier = Modifier.padding(18.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        modifier = Modifier.size(56.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = MusicIcon,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                                modifier = Modifier.size(28.dp)
-                                            )
-                                        }
-                                    }
+                                    Icon(
+                                        imageVector = MusicIcon,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(36.dp)
+                                    )
                                     Text(
-                                        "No music or audio loaded",
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        "Audio Permission Required",
+                                        style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        "Pick MP3, AAC, FLAC, or WAV files from storage to play and cast with OLED black screen protection.",
+                                        "CastBrowse needs access to audio files to scan your music collection, read metadata tags, and display album art.",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center
+                                        textAlign = TextAlign.Center,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
+                                    Button(
+                                        onClick = onRequestAudioPermission,
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Text("Grant Permission", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    } else if (pickedAudios.isEmpty()) {
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(18.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = MusicIcon,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                    Text(
+                                        "Set Up Your Music Library",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "Select your music folder to automatically scan and list all songs with album art and artist tags, or scan your device storage.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Button(
+                                            onClick = onPickAudioFolder,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text("📁 Select Folder", fontWeight = FontWeight.Bold)
+                                        }
+                                        OutlinedButton(
+                                            onClick = onScanDeviceAudio,
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text("🔄 Scan Device", fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -4385,6 +4546,16 @@ private fun DeviceAudioCard(
     onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    var albumArtBitmap by remember(item.uri) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(item.uri) {
+        withContext(Dispatchers.IO) {
+            val bmp = MediaHubManager.loadAlbumArt(context, item)
+            withContext(Dispatchers.Main) {
+                albumArtBitmap = bmp
+            }
+        }
+    }
 
     Card(
         shape = RoundedCornerShape(18.dp),
@@ -4408,15 +4579,25 @@ private fun DeviceAudioCard(
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = MusicIcon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(24.dp)
+                    val art = albumArtBitmap
+                    if (art != null) {
+                        Image(
+                            bitmap = art,
+                            contentDescription = item.album,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
                         )
+                    } else {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = MusicIcon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
 
@@ -4428,13 +4609,36 @@ private fun DeviceAudioCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = "${item.artist} • ${item.album}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    ) {
+                        if (item.artist.isNotBlank() && item.artist != "<unknown>") {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                            ) {
+                                Text(
+                                    text = item.artist,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (item.album.isNotBlank() && item.album != "<unknown>") {
+                            Text(
+                                text = item.album,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically

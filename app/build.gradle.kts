@@ -14,8 +14,8 @@ android {
         applicationId = "com.castbrowse.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.13.4"
+        versionCode = 22
+        versionName = "1.13.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
