@@ -62,7 +62,121 @@ import androidx.compose.ui.unit.LayoutDirection
 
 import android.os.Build
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import org.intellij.lang.annotations.Language
 
+/**
+ * Android Graphics Shading Language (AGSL) signed distance field (SDF) and normal calculation
+ * for rounded rectangular glass pane refraction (inspired by Kyant0/AndroidLiquidGlass & liquidGL).
+ */
+@Language("AGSL")
+private const val RoundedRectSDF = """
+float radiusAt(float2 coord, float4 radii) {
+    if (coord.x >= 0.0) {
+        if (coord.y <= 0.0) return radii.y;
+        else return radii.z;
+    } else {
+        if (coord.y <= 0.0) return radii.x;
+        else return radii.w;
+    }
+}
+
+float sdRoundedRect(float2 coord, float2 halfSize, float radius) {
+    float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
+    float outside = length(max(cornerCoord, 0.0)) - radius;
+    float inside = min(max(cornerCoord.x, cornerCoord.y), 0.0);
+    return outside + inside;
+}
+
+float2 gradSdRoundedRect(float2 coord, float2 halfSize, float radius) {
+    float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
+    if (cornerCoord.x >= 0.0 || cornerCoord.y >= 0.0) {
+        return sign(coord) * normalize(max(cornerCoord, 0.0));
+    } else {
+        float gradX = step(cornerCoord.y, cornerCoord.x);
+        return sign(coord) * float2(gradX, 1.0 - gradX);
+    }
+}
+"""
+
+/**
+ * Optical Liquid Glass Refraction Shader with 7-channel Chromatic Dispersion (AGSL)
+ * Calculates circular curvature lens mapping and prism chromatic dispersion across the bevel.
+ */
+@Language("AGSL")
+private const val RoundedRectRefractionWithDispersionShaderString = """
+uniform shader content;
+
+uniform float2 size;
+uniform float2 offset;
+uniform float4 cornerRadii;
+uniform float refractionHeight;
+uniform float refractionAmount;
+uniform float depthEffect;
+uniform float chromaticAberration;
+
+$RoundedRectSDF
+
+float circleMap(float x) {
+    return 1.0 - sqrt(1.0 - x * x);
+}
+
+half4 main(float2 coord) {
+    float2 halfSize = size * 0.5;
+    float2 centeredCoord = (coord + offset) - halfSize;
+    float radius = radiusAt(coord, cornerRadii);
+    
+    float sd = sdRoundedRect(centeredCoord, halfSize, radius);
+    if (-sd >= refractionHeight) {
+        return content.eval(coord);
+    }
+    sd = min(sd, 0.0);
+    
+    float d = circleMap(1.0 - -sd / refractionHeight) * refractionAmount;
+    float gradRadius = min(radius * 1.5, min(halfSize.x, halfSize.y));
+    float2 grad = normalize(gradSdRoundedRect(centeredCoord, halfSize, gradRadius) + depthEffect * normalize(centeredCoord));
+    
+    float2 refractedCoord = coord + d * grad;
+    float dispersionIntensity = chromaticAberration * ((centeredCoord.x * centeredCoord.y) / (halfSize.x * halfSize.y));
+    float2 dispersedCoord = d * grad * dispersionIntensity;
+    
+    half4 color = half4(0.0);
+    
+    half4 red = content.eval(refractedCoord + dispersedCoord);
+    color.r += red.r / 3.5;
+    color.a += red.a / 7.0;
+    
+    half4 orange = content.eval(refractedCoord + dispersedCoord * (2.0 / 3.0));
+    color.r += orange.r / 3.5;
+    color.g += orange.g / 7.0;
+    color.a += orange.a / 7.0;
+    
+    half4 yellow = content.eval(refractedCoord + dispersedCoord * (1.0 / 3.0));
+    color.r += yellow.r / 3.5;
+    color.g += yellow.g / 3.5;
+    color.a += yellow.a / 7.0;
+    
+    half4 green = content.eval(refractedCoord);
+    color.g += green.g / 3.5;
+    color.a += green.a / 7.0;
+    
+    half4 cyan = content.eval(refractedCoord - dispersedCoord * (1.0 / 3.0));
+    color.g += cyan.g / 3.5;
+    color.b += cyan.b / 3.0;
+    color.a += cyan.a / 7.0;
+    
+    half4 blue = content.eval(refractedCoord - dispersedCoord * (2.0 / 3.0));
+    color.b += blue.b / 3.0;
+    color.a += blue.a / 7.0;
+    
+    half4 purple = content.eval(refractedCoord - dispersedCoord);
+    color.r += purple.r / 7.0;
+    color.b += purple.b / 3.0;
+    color.a += purple.a / 7.0;
+    
+    return color;
+}
+"""
 
 /**
  * Premium Refractive Liquid Glass Design System
@@ -297,13 +411,13 @@ fun Modifier.glassmorphic(
     .clip(shape)
 
 /**
- * Modifier extension: Apply true refractive liquid glass surface.
- * Renders the optical translucent glass surface, specular Fresnel rim highlights,
- * and delicate caustic depth shadows BEHIND the composable content.
- * The foreground UI (icons, text, buttons) is rendered completely sharp and crisp
- * without any blur, distortion, or chromatic fringing.
+ * Isolated Glass Backdrop Plate modifier:
+ * Applies shadow elevation, AGSL circular curvature refraction with 7-band chromatic dispersion,
+ * hardware blur RenderEffect, neutral optical translucency, specular sheen, and refractive border.
+ * Designed to be placed on an isolated background layer beneath foreground UI so that text and icons
+ * remain completely sharp and unblurred.
  */
-fun Modifier.refractiveGlass(
+fun Modifier.glassBackdropPlate(
     shape: Shape = RoundedCornerShape(20.dp),
     isDark: Boolean = true,
     isAmoled: Boolean = false,
@@ -311,6 +425,8 @@ fun Modifier.refractiveGlass(
     elevation: Dp = 10.dp,
     glowColor: Color? = null
 ): Modifier = composed {
+    val density = LocalDensity.current
+
     this
         .shadow(
             elevation = elevation,
@@ -319,15 +435,54 @@ fun Modifier.refractiveGlass(
             ambientColor = Color.Black.copy(alpha = if (isDark) 0.38f else 0.08f),
             spotColor = glowColor ?: Color.Black.copy(alpha = if (isDark) 0.18f else 0.04f)
         )
+        .graphicsLayer {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    val w = size.width
+                    val h = size.height
+                    if (w > 0f && h > 0f) {
+                        val cornerRadius = with(density) {
+                            when (shape) {
+                                is RoundedCornerShape -> shape.topStart.toPx(size, density)
+                                is ChocolateBarShape -> shape.cornerRadius.toPx()
+                                else -> 20.dp.toPx()
+                            }
+                        }.coerceAtMost(minOf(w, h) / 2f)
+
+                        val shader = android.graphics.RuntimeShader(RoundedRectRefractionWithDispersionShaderString).apply {
+                            setFloatUniform("size", w, h)
+                            setFloatUniform("offset", 0f, 0f)
+                            setFloatUniform("cornerRadii", cornerRadius, cornerRadius, cornerRadius, cornerRadius)
+                            setFloatUniform("refractionHeight", with(density) { 14.dp.toPx() })
+                            setFloatUniform("refractionAmount", with(density) { -10.dp.toPx() })
+                            setFloatUniform("depthEffect", 0.85f)
+                            setFloatUniform("chromaticAberration", 0.75f)
+                        }
+                        val refractionEffect = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+                        val blurEffect = android.graphics.RenderEffect.createBlurEffect(16f, 16f, android.graphics.Shader.TileMode.CLAMP)
+                        renderEffect = android.graphics.RenderEffect.createChainEffect(refractionEffect, blurEffect).asComposeRenderEffect()
+                    }
+                } catch (_: Throwable) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            renderEffect = android.graphics.RenderEffect.createBlurEffect(18f, 18f, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
+                        } catch (_: Throwable) {}
+                    }
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    renderEffect = android.graphics.RenderEffect.createBlurEffect(18f, 18f, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
+                } catch (_: Throwable) {}
+            }
+        }
         .background(
             color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
             shape = shape
         )
         .drawBehind {
-            // Subtle specular sheen and caustic light catch strictly BEHIND foreground UI
             val sheen = Brush.verticalGradient(
                 colors = listOf(
-                    Color.White.copy(alpha = if (isDark) 0.08f else 0.14f),
+                    Color.White.copy(alpha = if (isDark) 0.12f else 0.22f),
                     Color.Transparent
                 ),
                 startY = 0f,
@@ -340,6 +495,107 @@ fun Modifier.refractiveGlass(
             shape = shape
         )
         .clip(shape)
+}
+
+/**
+ * Refractive Liquid Glass Surface (inspired by naughtyduk/liquidGL & Kyant0/AndroidLiquidGlass).
+ * Decouples the optical refractive glass plate into an isolated background sibling layer:
+ * - Layer 1 (Backdrop): Has AGSL circular curvature lens refraction, 7-band chromatic dispersion,
+ *   hardware blur RenderEffect, specular Fresnel sheen, and refractive border.
+ * - Layer 2 (Foreground UI): Crisp, 100% sharp text, icons, badges, and controls sitting on top
+ *   without any blur, distortion, or chromatic fringing!
+ */
+@Composable
+fun RefractiveGlassSurface(
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(20.dp),
+    isDark: Boolean = isSystemInDarkTheme(),
+    isAmoled: Boolean = false,
+    borderWidth: Dp = 1.dp,
+    elevation: Dp = 10.dp,
+    glowColor: Color? = null,
+    contentAlignment: Alignment = Alignment.TopStart,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = contentAlignment
+    ) {
+        // Isolated Glass Plate with AGSL Refraction & Hardware Blur
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .glassBackdropPlate(
+                    shape = shape,
+                    isDark = isDark,
+                    isAmoled = isAmoled,
+                    borderWidth = borderWidth,
+                    elevation = elevation,
+                    glowColor = glowColor
+                )
+        )
+        // Foreground UI Content (Razor-sharp, zero blur)
+        content()
+    }
+}
+
+/**
+ * Modifier extension: Apply true refractive liquid glass surface.
+ * When enableBlur is false (default for modifier usage directly on leaf composables),
+ * provides pure neutral optical translucency, specular sheen, and refractive border.
+ * When enableBlur is true, applies the full AGSL circular curvature refraction and hardware blur.
+ * For composables containing text or icons, prefer using [RefractiveGlassSurface] to ensure
+ * child content is rendered completely crisp and unblurred on top of the glass plate.
+ */
+fun Modifier.refractiveGlass(
+    shape: Shape = RoundedCornerShape(20.dp),
+    isDark: Boolean = true,
+    isAmoled: Boolean = false,
+    borderWidth: Dp = 1.dp,
+    elevation: Dp = 10.dp,
+    glowColor: Color? = null,
+    enableBlur: Boolean = false
+): Modifier = if (enableBlur) {
+    this.glassBackdropPlate(
+        shape = shape,
+        isDark = isDark,
+        isAmoled = isAmoled,
+        borderWidth = borderWidth,
+        elevation = elevation,
+        glowColor = glowColor
+    )
+} else {
+    composed {
+        this
+            .shadow(
+                elevation = elevation,
+                shape = shape,
+                clip = false,
+                ambientColor = Color.Black.copy(alpha = if (isDark) 0.38f else 0.08f),
+                spotColor = glowColor ?: Color.Black.copy(alpha = if (isDark) 0.18f else 0.04f)
+            )
+            .background(
+                color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
+                shape = shape
+            )
+            .drawBehind {
+                // Subtle specular sheen and caustic light catch strictly BEHIND foreground UI
+                val sheen = Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = if (isDark) 0.08f else 0.14f),
+                        Color.Transparent
+                    ),
+                    startY = 0f,
+                    endY = size.height * 0.45f
+                )
+                drawRect(sheen)
+            }
+            .border(
+                border = GlassmorphicTheme.refractiveBorder(isDark, isAmoled, borderWidth),
+                shape = shape
+            )
+            .clip(shape)
+    }
 }
 
 /**
@@ -512,18 +768,18 @@ fun ChocolateBottomBar(
             .padding(horizontal = 12.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .refractiveGlass(
-                    shape = chocolateShape,
-                    isDark = isDark,
-                    isAmoled = isAmoled,
-                    borderWidth = 1.dp,
-                    elevation = 14.dp
-                )
+        RefractiveGlassSurface(
+            shape = chocolateShape,
+            isDark = isDark,
+            isAmoled = isAmoled,
+            borderWidth = 1.dp,
+            elevation = 14.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Top Row: Address bar, Tab count, Three-dot menu
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Top Row: Address bar, Tab count, Three-dot menu
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -691,6 +947,7 @@ fun ChocolateBottomBar(
         }
     }
 }
+}
 
 /**
  * Floating Refractive Glass Bottom Navigation Bar (Single Pill for top address bar mode)
@@ -712,15 +969,13 @@ fun FloatingGlassmorphicBottomBar(
         contentAlignment = Alignment.Center
     ) {
         val capsuleShape = RoundedCornerShape(26.dp)
-        Box(
+        RefractiveGlassSurface(
+            shape = capsuleShape,
+            isDark = isDark,
+            isAmoled = isAmoled,
+            borderWidth = 1.dp,
+            elevation = 12.dp,
             modifier = Modifier
-                .refractiveGlass(
-                    shape = capsuleShape,
-                    isDark = isDark,
-                    isAmoled = isAmoled,
-                    borderWidth = 1.dp,
-                    elevation = 12.dp
-                )
                 .height(54.dp)
                 .fillMaxWidth()
         ) {
@@ -875,9 +1130,18 @@ fun SpeedDialHomeScreen(
     var itemToDelete by remember { mutableStateOf<SpeedDialItem?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
+    val homeBg = if (isAmoled) {
+        Brush.verticalGradient(listOf(Color.Black, Color.Black))
+    } else if (isDark) {
+        Brush.verticalGradient(listOf(Color(0xFF0F1015), Color(0xFF0A0B0E)))
+    } else {
+        Brush.verticalGradient(listOf(Color(0xFFF8FAFC), Color(0xFFEDF2F7)))
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
+            .background(homeBg)
     ) {
         Column(
             modifier = Modifier
@@ -890,11 +1154,13 @@ fun SpeedDialHomeScreen(
             Spacer(modifier = Modifier.height(28.dp))
 
             // Brand Header with Specular Refractive Glass Surface
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .refractiveGlass(shape = CircleShape, isDark = isDark, isAmoled = isAmoled, elevation = 12.dp),
-                contentAlignment = Alignment.Center
+            RefractiveGlassSurface(
+                shape = CircleShape,
+                isDark = isDark,
+                isAmoled = isAmoled,
+                elevation = 12.dp,
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(64.dp)
             ) {
                 Text("📡", fontSize = 28.sp)
             }
@@ -917,10 +1183,12 @@ fun SpeedDialHomeScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Refractive Liquid Glass Quick Search / URL Bar
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .refractiveGlass(shape = RoundedCornerShape(22.dp), isDark = isDark, isAmoled = isAmoled, elevation = 8.dp)
+            RefractiveGlassSurface(
+                shape = RoundedCornerShape(22.dp),
+                isDark = isDark,
+                isAmoled = isAmoled,
+                elevation = 8.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
@@ -1064,17 +1332,14 @@ fun SpeedDialHomeScreen(
                             ) {
                                 // Refractive Glass Shortcut Icon Tile
                                 val tileColor = Color(item.accentColor)
-                                Box(
-                                    modifier = Modifier
-                                        .size(54.dp)
-                                        .refractiveGlass(
-                                            shape = RoundedCornerShape(16.dp),
-                                            isDark = isDark,
-                                            isAmoled = isAmoled,
-                                            elevation = 6.dp,
-                                            glowColor = if (!isAddTile) tileColor.copy(alpha = 0.25f) else null
-                                        ),
-                                    contentAlignment = Alignment.Center
+                                RefractiveGlassSurface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    isDark = isDark,
+                                    isAmoled = isAmoled,
+                                    elevation = 6.dp,
+                                    glowColor = if (!isAddTile) tileColor.copy(alpha = 0.25f) else null,
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.size(54.dp)
                                 ) {
                                     Text(
                                         text = item.iconEmoji,

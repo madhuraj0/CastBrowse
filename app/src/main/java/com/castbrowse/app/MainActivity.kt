@@ -455,16 +455,14 @@ private fun NavCircleButton(
     isAmoled: Boolean = false,
     onClick: () -> Unit
 ) {
-    Box(
+    RefractiveGlassSurface(
+        shape = CircleShape,
+        isDark = isDark,
+        isAmoled = isAmoled,
+        elevation = 2.dp,
         contentAlignment = Alignment.Center,
         modifier = modifier
             .size(38.dp)
-            .refractiveGlass(
-                shape = CircleShape,
-                isDark = isDark,
-                isAmoled = isAmoled,
-                elevation = 2.dp
-            )
             .tactilePress {
                 if (enabled) onClick()
             }
@@ -2201,7 +2199,9 @@ class MainActivity : ComponentActivity() {
                     .zIndex(2f)
             ) {
                 Box(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
                 ) {
                     MediaHubPage(
                         extractedVideos = extractedVideos,
