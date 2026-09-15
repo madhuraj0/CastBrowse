@@ -456,24 +456,23 @@ private fun NavCircleButton(
     isAmoled: Boolean = false,
     onClick: () -> Unit
 ) {
-    RefractiveGlassSurface(
+    Surface(
         shape = CircleShape,
-        isDark = isDark,
-        isAmoled = isAmoled,
-        elevation = 2.dp,
-        contentAlignment = Alignment.Center,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+        shadowElevation = 1.dp,
         modifier = modifier
             .size(38.dp)
-            .tactilePress {
-                if (enabled) onClick()
-            }
+            .clickable(enabled = enabled, onClick = onClick)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(19.dp),
-            tint = if (enabled) tint else tint.copy(alpha = 0.35f)
-        )
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(19.dp),
+                tint = if (enabled) tint else tint.copy(alpha = 0.35f)
+            )
+        }
     }
 }
 
@@ -1215,15 +1214,11 @@ class MainActivity : ComponentActivity() {
                 val activeDevice = CastSessionManager.castingDevice
                 Surface(
                     shape = CircleShape,
-                    color = Color.Transparent,
-                    border = GlassmorphicTheme.specularBorder(isDark, isAmoled, 1.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    shadowElevation = 1.dp,
                     modifier = Modifier
                         .size(34.dp)
-                        .background(
-                            brush = GlassmorphicTheme.refractiveGlassBrush(isDark, isAmoled),
-                            shape = CircleShape
-                        )
-                        .shadow(3.dp, CircleShape, spotColor = if (activeDevice != null) MaterialTheme.colorScheme.primary else Color.Transparent)
                         .clickable {
                             val intent = android.content.Intent(context, CastWizardActivity::class.java)
                             context.startActivity(intent)
@@ -1244,52 +1239,50 @@ class MainActivity : ComponentActivity() {
 
             // Address / search field container with horizontal swipe to switch tabs
             var accumulatedDrag by remember { mutableStateOf(0f) }
-            Box(
+            Surface(
+                shape = RoundedCornerShape(19.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    width = if (addressBarFocused) 1.5.dp else 1.dp,
+                    color = if (addressBarFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                ),
+                shadowElevation = if (addressBarFocused) 3.dp else 1.dp,
                 modifier = Modifier
                     .weight(1f)
                     .height(38.dp)
-                    .refractiveGlass(
-                        shape = RoundedCornerShape(19.dp),
-                        isDark = isDark,
-                        isAmoled = isAmoled,
-                        borderWidth = if (addressBarFocused) 1.5.dp else 1.dp,
-                        elevation = if (addressBarFocused) 6.dp else 2.dp,
-                        glowColor = if (addressBarFocused) MaterialTheme.colorScheme.primary else null
-                    )
-                                .pointerInput(tabs.size, activeTabId) {
-                                    detectHorizontalDragGestures(
-                                        onDragStart = { accumulatedDrag = 0f },
-                                        onDragEnd = {
-                                            val threshold = 70f
-                                            val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
-                                            if (accumulatedDrag > threshold && currentIdx > 0) {
-                                                switchTab(tabs[currentIdx - 1].id)
-                                            } else if (accumulatedDrag < -threshold && currentIdx >= 0 && currentIdx < tabs.size - 1) {
-                                                switchTab(tabs[currentIdx + 1].id)
-                                            }
-                                            accumulatedDrag = 0f
-                                        },
-                                        onHorizontalDrag = { _, dragAmount ->
-                                            accumulatedDrag += dragAmount
-                                        }
-                                    )
+                    .pointerInput(tabs.size, activeTabId) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { accumulatedDrag = 0f },
+                            onDragEnd = {
+                                val threshold = 70f
+                                val currentIdx = tabs.indexOfFirst { it.id == activeTabId }
+                                if (accumulatedDrag > threshold && currentIdx > 0) {
+                                    switchTab(tabs[currentIdx - 1].id)
+                                } else if (accumulatedDrag < -threshold && currentIdx >= 0 && currentIdx < tabs.size - 1) {
+                                    switchTab(tabs[currentIdx + 1].id)
                                 }
-                                .padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val onSurfaceColor = MaterialTheme.colorScheme.onSurface
-                                val androidColor = remember(onSurfaceColor) {
-                                    android.graphics.Color.argb(
-                                        (onSurfaceColor.alpha * 255).toInt(),
-                                        (onSurfaceColor.red * 255).toInt(),
-                                        (onSurfaceColor.green * 255).toInt(),
-                                        (onSurfaceColor.blue * 255).toInt()
-                                    )
-                                }
+                                accumulatedDrag = 0f
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                accumulatedDrag += dragAmount
+                            }
+                        )
+                    }
+                    .padding(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+                    val androidColor = remember(onSurfaceColor) {
+                        android.graphics.Color.argb(
+                            (onSurfaceColor.alpha * 255).toInt(),
+                            (onSurfaceColor.red * 255).toInt(),
+                            (onSurfaceColor.green * 255).toInt(),
+                            (onSurfaceColor.blue * 255).toInt()
+                        )
+                    }
                                 
                                 androidx.compose.ui.viewinterop.AndroidView(
                                     factory = { ctx ->
@@ -1369,14 +1362,11 @@ class MainActivity : ComponentActivity() {
                             // Chrome-style Tab Counter Button
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                border = GlassmorphicTheme.specularBorder(isDark, isAmoled, 1.dp),
-                                color = Color.Transparent,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shadowElevation = 1.dp,
                                 modifier = Modifier
                                     .size(30.dp)
-                                    .background(
-                                        brush = GlassmorphicTheme.refractiveGlassBrush(isDark, isAmoled),
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
                                     .clickable { showTabSwitcher = true }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -1411,13 +1401,7 @@ class MainActivity : ComponentActivity() {
                                     onDismissRequest = { showMoreActionsSheet = false },
                                     modifier = Modifier
                                         .width(265.dp)
-                                        .refractiveGlass(
-                                            shape = RoundedCornerShape(22.dp),
-                                            isDark = isDark,
-                                            isAmoled = isAmoled,
-                                            elevation = 16.dp
-                                        )
-                                        .padding(vertical = 8.dp)
+                                        .padding(vertical = 4.dp)
                                 ) {
                                     // 1. Chrome-Style Navigation Controls Panel (with tactile Round Depth Effect)
                                     val currentUrl = activeTab.url
@@ -1773,15 +1757,14 @@ class MainActivity : ComponentActivity() {
         }
 
         val browserControls = @Composable { isBottom: Boolean ->
-            Box(
+            Surface(
+                shape = if (isBottom) RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp) else RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 3.dp,
+                shadowElevation = 4.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                 modifier = (if (isBottom) Modifier.navigationBarsPadding() else Modifier.statusBarsPadding())
                     .fillMaxWidth()
-                    .refractiveGlass(
-                        shape = if (isBottom) RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp) else RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                        isDark = isDark,
-                        isAmoled = isAmoled,
-                        elevation = 8.dp
-                    )
             ) {
                 Column {
                     if (!isBottom && showTabBar) {
@@ -1935,31 +1918,27 @@ class MainActivity : ComponentActivity() {
                     if (!isBottomAddressBar) {
                         browserControls(false)
                     } else if (showTabBar) {
-                        Box(
+                        Surface(
+                            shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+                            color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 2.dp,
+                            shadowElevation = 3.dp,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .statusBarsPadding()
-                                .refractiveGlass(
-                                    shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
-                                    isDark = isDark,
-                                    isAmoled = isAmoled,
-                                    elevation = 4.dp
-                                )
                         ) {
                             tabsRow()
                         }
                     }
                 } else {
-                    Box(
+                    Surface(
+                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                        color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 3.dp,
+                        shadowElevation = 4.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
-                            .refractiveGlass(
-                                shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                                isDark = isDark,
-                                isAmoled = isAmoled,
-                                elevation = 8.dp
-                            )
                     ) {
                         TopAppBar(
                             title = {
@@ -2504,8 +2483,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 shape = RoundedCornerShape(24.dp),
-                containerColor = Color.Transparent,
-                modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(24.dp), elevation = 12.dp)
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
         }
 
@@ -2533,9 +2511,8 @@ class MainActivity : ComponentActivity() {
                 dismissButton = {
                     TextButton(onClick = { showPanicDialog = false }) { Text("Cancel") }
                 },
-                shape = RoundedCornerShape(20.dp),
-                containerColor = Color.Transparent,
-                modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(20.dp), elevation = 12.dp, glowColor = MaterialTheme.colorScheme.error)
+                shape = RoundedCornerShape(24.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
         }
 
@@ -2553,21 +2530,21 @@ class MainActivity : ComponentActivity() {
                     Scaffold(
                         containerColor = Color.Transparent,
                         topBar = {
-                            Box(
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                tonalElevation = 3.dp,
+                                shadowElevation = 4.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .statusBarsPadding()
                                     .padding(horizontal = 16.dp, vertical = 10.dp)
-                                    .refractiveGlass(
-                                        shape = RoundedCornerShape(22.dp),
-                                        isDark = isDark,
-                                        isAmoled = isAmoled,
-                                        elevation = 8.dp
-                                    )
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 8.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -2612,18 +2589,20 @@ class MainActivity : ComponentActivity() {
                         ) {
                             items(tabs, key = { it.id }) { tab ->
                                 val isActive = tab.id == activeTabId
-                                Box(
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                        else MaterialTheme.colorScheme.surfaceContainerHigh
+                                    ),
+                                    border = BorderStroke(
+                                        width = if (isActive) 2.dp else 1.dp,
+                                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 6.dp else 2.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(180.dp)
-                                        .refractiveGlass(
-                                            shape = RoundedCornerShape(18.dp),
-                                            isDark = isDark,
-                                            isAmoled = isAmoled,
-                                            borderWidth = if (isActive) 1.5.dp else 1.dp,
-                                            elevation = if (isActive) 12.dp else 4.dp,
-                                            glowColor = if (isActive) MaterialTheme.colorScheme.primary else null
-                                        )
                                         .clickable {
                                             switchTab(tab.id)
                                             showTabSwitcher = false
@@ -2658,25 +2637,18 @@ class MainActivity : ComponentActivity() {
                                                 modifier = Modifier.size(24.dp)
                                             ) {
                                                 Icon(
-                                                    Icons.Default.Close,
-                                                    contentDescription = "Close Tab",
-                                                    modifier = Modifier.size(16.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Close tab",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
                                                 )
                                             }
                                         }
                                         
-                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         
-                                        // Domain URL
-                                        val domain = try {
-                                            val host = Uri.parse(tab.url).host
-                                            host ?: tab.url
-                                        } catch (e: Exception) {
-                                            tab.url
-                                        }
                                         Text(
-                                            text = domain,
+                                            text = tab.url.removePrefix("https://").removePrefix("http://"),
                                             fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.outline,
                                             maxLines = 1,
@@ -2686,17 +2658,13 @@ class MainActivity : ComponentActivity() {
                                         Spacer(modifier = Modifier.weight(1f))
                                         
                                         // Visual Card Preview Area
-                                        Box(
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .height(95.dp)
-                                                .refractiveGlass(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    isDark = isDark,
-                                                    isAmoled = isAmoled,
-                                                    elevation = 2.dp
-                                                ),
-                                            contentAlignment = Alignment.Center
                                         ) {
                                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                                 Icon(
@@ -3256,8 +3224,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 shape = RoundedCornerShape(24.dp),
-                containerColor = Color.Transparent,
-                modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(24.dp), elevation = 12.dp, glowColor = MaterialTheme.colorScheme.primary)
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
         }
     }
@@ -4114,14 +4081,13 @@ private fun WebStreamCard(
     }
 
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
         ),
-        border = GlassmorphicTheme.specularBorder(width = 1.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column {
             if (video.poster.isNotEmpty()) {
@@ -4384,14 +4350,13 @@ private fun DeviceVideoCard(
     val context = LocalContext.current
 
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
         ),
-        border = GlassmorphicTheme.specularBorder(width = 1.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp))
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -4558,17 +4523,17 @@ private fun DeviceAudioCard(
     }
 
     Card(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isCurrentPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
+            containerColor = if (isCurrentPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+            else MaterialTheme.colorScheme.surfaceContainer
         ),
-        border = GlassmorphicTheme.specularBorder(
-            width = if (isCurrentPlaying) 1.5.dp else 1.dp
+        border = BorderStroke(
+            width = if (isCurrentPlaying) 1.5.dp else 1.dp,
+            color = if (isCurrentPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp))
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isCurrentPlaying) 4.dp else 2.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -4767,8 +4732,8 @@ private fun PhotoThumbnailCard(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(14.dp),
         border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
-                 else GlassmorphicTheme.specularBorder(width = 1.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
+                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (thumbnailBitmap != null) {
@@ -5055,7 +5020,6 @@ private fun UserAgentPresetsDialog(
             }
         },
         shape = RoundedCornerShape(24.dp),
-        containerColor = Color.Transparent,
-        modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(24.dp), elevation = 12.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     )
 }
