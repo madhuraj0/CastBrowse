@@ -150,31 +150,19 @@ class CastPlaybackService : Service() {
     }
 
     private fun handleTogglePlayPause() {
-        val ip = currentIp.ifEmpty { CastSessionManager.castingDevice?.ipAddress ?: return }
-        val port = currentPort
         serviceScope.launch(Dispatchers.IO) {
             if (CastSessionManager.isMediaPlaying) {
-                FCastClient.pause(ip, port)
-                CastSessionManager.isMediaPlaying = false
-                CastSessionManager.playbackState = 2
+                CastSessionManager.pause()
             } else {
-                FCastClient.resume(ip, port)
-                CastSessionManager.isMediaPlaying = true
-                CastSessionManager.playbackState = 1
+                CastSessionManager.resume()
             }
             updateNotification()
         }
     }
 
     private fun handleStop() {
-        val ip = currentIp.ifEmpty { CastSessionManager.castingDevice?.ipAddress ?: "" }
-        val port = currentPort
         serviceScope.launch(Dispatchers.IO) {
-            if (ip.isNotEmpty()) {
-                FCastClient.stop(ip, port)
-            }
-            CastSessionManager.isMediaPlaying = false
-            CastSessionManager.activeMediaUrl = null
+            CastSessionManager.stop()
             stopSelf()
         }
     }

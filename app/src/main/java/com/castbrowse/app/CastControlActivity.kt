@@ -324,11 +324,7 @@ class CastControlActivity : ComponentActivity() {
                                 isUserSeeking = false
                                 localOffsetSeconds = sliderValue.toInt()
                                 lifecycleScope.launch {
-                                    FCastClient.seek(
-                                        activeDevice.ipAddress,
-                                        sliderValue.toDouble(),
-                                        targetPort
-                                    )
+                                    CastSessionManager.seek(sliderValue.toDouble())
                                 }
                             },
                             valueRange = 0f..maxDuration
@@ -346,11 +342,7 @@ class CastControlActivity : ComponentActivity() {
                                 localOffsetSeconds = maxOf(0, localOffsetSeconds - 30)
                                 sliderValue = localOffsetSeconds.toFloat()
                                 lifecycleScope.launch {
-                                    FCastClient.seek(
-                                        activeDevice.ipAddress,
-                                        localOffsetSeconds.toDouble(),
-                                        targetPort
-                                    )
+                                    CastSessionManager.seek(localOffsetSeconds.toDouble())
                                 }
                             },
                             modifier = Modifier.size(56.dp)
@@ -364,16 +356,11 @@ class CastControlActivity : ComponentActivity() {
 
                         FilledIconButton(
                             onClick = {
-                                val port = targetPort
                                 lifecycleScope.launch {
                                     if (isTimerActive) {
-                                        FCastClient.pause(activeDevice.ipAddress, port)
-                                        CastSessionManager.isMediaPlaying = false
-                                        CastSessionManager.playbackState = 2
+                                        CastSessionManager.pause()
                                     } else {
-                                        FCastClient.resume(activeDevice.ipAddress, port)
-                                        CastSessionManager.isMediaPlaying = true
-                                        CastSessionManager.playbackState = 1
+                                        CastSessionManager.resume()
                                     }
                                     CastPlaybackService.updateState(this@CastControlActivity)
                                 }
@@ -393,11 +380,7 @@ class CastControlActivity : ComponentActivity() {
                                 localOffsetSeconds += 30
                                 sliderValue = localOffsetSeconds.toFloat()
                                 lifecycleScope.launch {
-                                    FCastClient.seek(
-                                        activeDevice.ipAddress,
-                                        localOffsetSeconds.toDouble(),
-                                        targetPort
-                                    )
+                                    CastSessionManager.seek(localOffsetSeconds.toDouble())
                                 }
                             },
                             modifier = Modifier.size(56.dp)
@@ -431,13 +414,8 @@ class CastControlActivity : ComponentActivity() {
                                 value = volumeState,
                                 onValueChange = { volumeState = it },
                                 onValueChangeFinished = {
-                                    CastSessionManager.volume = volumeState / 100f
                                     lifecycleScope.launch {
-                                        FCastClient.setVolume(
-                                            activeDevice.ipAddress,
-                                            volumeState / 100f,
-                                            targetPort
-                                        )
+                                        CastSessionManager.setVolume(volumeState / 100f)
                                     }
                                 },
                                 valueRange = 0f..100f,
@@ -527,10 +505,7 @@ class CastControlActivity : ComponentActivity() {
                         onClick = {
                             lifecycleScope.launch {
                                 CastPlaybackService.stop(this@CastControlActivity)
-                                FCastClient.stop(activeDevice.ipAddress, targetPort)
-                                CastSessionManager.isMediaPlaying = false
-                                CastSessionManager.activeMediaUrl = null
-                                CastSessionManager.activeMediaTitle = null
+                                CastSessionManager.stop()
                                 Toast.makeText(this@CastControlActivity, "Playback stopped", Toast.LENGTH_SHORT).show()
                                 finish()
                             }

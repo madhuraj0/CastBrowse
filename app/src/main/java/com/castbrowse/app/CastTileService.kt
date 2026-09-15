@@ -46,24 +46,13 @@ class CastTileService : TileService() {
     override fun onClick() {
         super.onClick()
 
-        // 1. Check clipboard for media / website URL
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        val clipText = clipboard?.primaryClip?.getItemAt(0)?.text?.toString()?.trim()
-        val url = if (!clipText.isNullOrEmpty() && (clipText.startsWith("http://", ignoreCase = true) || clipText.startsWith("https://", ignoreCase = true))) {
-            clipText
-        } else {
-            null
-        }
-
-        // 2. Prepare launch intent
+        // Pass intent to MainActivity to check clipboard once the window gains user focus (required on Android 10+)
         val launchIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            if (url != null) {
-                putExtra("EXTRA_LOAD_URL", url)
-            } else {
-                putExtra("EXTRA_OPEN_STREAMS", true)
-            }
+            putExtra("EXTRA_CHECK_CLIPBOARD", true)
         }
+
+        // Launch activity and collapse QS panel
 
         // 3. Launch activity and collapse QS panel
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

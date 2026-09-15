@@ -398,6 +398,7 @@ class MainActivity : ComponentActivity() {
 
     // Requested navigation tab from external intents (0 = Browser, 1 = Streams Hub)
     private var requestedNavTab by mutableStateOf<Int?>(null)
+    private var pendingCheckClipboardOnFocus = false
 
     data class BrowserTab(val id: Int, val title: String, val url: String)
 
@@ -434,6 +435,35 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && pendingCheckClipboardOnFocus) {
+            pendingCheckClipboardOnFocus = false
+            checkAndHandleClipboard()
+        }
+    }
+
+    private fun checkAndHandleClipboard() {
+        try {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            val clip = clipboard?.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val text = clip.getItemAt(0)?.text?.toString()?.trim()
+                if (!text.isNullOrEmpty() && (text.startsWith("http://", ignoreCase = true) || text.startsWith("https://", ignoreCase = true))) {
+                    val url = extractUrl(text)
+                    requestedNavTab = 0
+                    handleUrlInput(url)
+                    Toast.makeText(this, "Loaded link from clipboard", Toast.LENGTH_SHORT).show()
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Error reading clipboard", e)
+        }
+        // If no URL found on clipboard, default to Streams Hub
+        requestedNavTab = 1
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -444,6 +474,14 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return
         if (intent.getBooleanExtra("EXTRA_PANIC_WIPE", false)) {
             triggerPanicWipe()
+            return
+        }
+        if (intent.getBooleanExtra("EXTRA_CHECK_CLIPBOARD", false)) {
+            if (hasWindowFocus()) {
+                checkAndHandleClipboard()
+            } else {
+                pendingCheckClipboardOnFocus = true
+            }
             return
         }
         if (intent.getBooleanExtra("EXTRA_OPEN_STREAMS", false)) {
@@ -625,14 +663,12 @@ class MainActivity : ComponentActivity() {
             } else {
                 LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
             }
-            android.util.Log.d("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort -> $proxiedUrl")
+            android.util.Log.d("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort (${device.protocol}) -> $proxiedUrl")
             val cleanTitle = videoTitle.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(videoUrl) }
-            val result = FCastClient.play(
-                ipAddress = device.ipAddress,
-                url = proxiedUrl,
-                title = cleanTitle,
-                port = targetPort,
-                headers = null
+            val result = CastSessionManager.play(
+                device = device,
+                mediaUrl = proxiedUrl,
+                title = cleanTitle
             ) {
                 lifecycleScope.launch {
                     CastPlaybackService.stop(this@MainActivity)
@@ -649,6 +685,7 @@ class MainActivity : ComponentActivity() {
                 CastSessionManager.activeMediaTitle = cleanTitle
                 CastSessionManager.castingDevice = device
                 CastSessionManager.customFcastPort = targetPort
+                CastSessionManager.saveRecentIp(this@MainActivity, device.ipAddress)
 
                 // Keep screen-lock background casting alive via Foreground Service + WakeLock
                 CastPlaybackService.start(

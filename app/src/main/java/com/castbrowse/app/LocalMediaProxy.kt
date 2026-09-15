@@ -154,6 +154,12 @@ object LocalMediaProxy {
     }
 
     fun getLocalIpAddress(targetReceiverIp: String? = null): String {
+        // 0. Check if device is acting as Wi-Fi Hotspot / AP
+        val hotspotIp = NetworkDiagnostics.getHotspotIp()
+        if (hotspotIp != null && (targetReceiverIp == null || targetReceiverIp.startsWith("192.168.43.") || targetReceiverIp.startsWith("192.168.49."))) {
+            return hotspotIp
+        }
+
         // 1. If we have a verified local IP from an active socket connection to the receiver
         verifiedLocalIp?.let { return it }
 
@@ -251,6 +257,69 @@ object LocalMediaProxy {
             if (parts.size < 2) return
             val method = parts[0].uppercase()
             val path = parts[1]
+
+            if (path == "/tv" || path == "/tv/") {
+                socket.inetAddress?.hostAddress?.let { clientIp ->
+                    WebReceiverController.recordHeartbeat(clientIp)
+                }
+                val html = getTvReceiverHtml()
+                val bytes = html.toByteArray(Charsets.UTF_8)
+                val out = socket.getOutputStream()
+                out.write(("HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: text/html; charset=utf-8\r\n" +
+                        "Content-Length: ${bytes.size}\r\n" +
+                        "Connection: close\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n\r\n").toByteArray())
+                out.write(bytes)
+                out.flush()
+                return
+            }
+
+            if (path.startsWith("/tv/api/state")) {
+                socket.inetAddress?.hostAddress?.let { clientIp ->
+                    WebReceiverController.recordHeartbeat(clientIp)
+                }
+                val json = WebReceiverController.getStateJson()
+                val bytes = json.toByteArray(Charsets.UTF_8)
+                val out = socket.getOutputStream()
+                out.write(("HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Length: ${bytes.size}\r\n" +
+                        "Connection: close\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n\r\n").toByteArray())
+                out.write(bytes)
+                out.flush()
+                return
+            }
+
+            if (path.startsWith("/tv/api/progress")) {
+                val contentLength = clientHeaders["content-length"]?.toIntOrNull() ?: 0
+                if (contentLength > 0) {
+                    val bodyChars = CharArray(contentLength)
+                    var read = 0
+                    while (read < contentLength) {
+                        val count = reader.read(bodyChars, read, contentLength - read)
+                        if (count == -1) break
+                        read += count
+                    }
+                    val bodyStr = String(bodyChars, 0, read)
+                    try {
+                        val element = kotlinx.serialization.json.Json.parseToJsonElement(bodyStr)
+                        if (element is kotlinx.serialization.json.JsonObject) {
+                            WebReceiverController.handleProgressUpdate(element)
+                        }
+                    } catch (e: Exception) {}
+                }
+                val out = socket.getOutputStream()
+                val response = "{\"ok\":true}"
+                out.write(("HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: application/json; charset=utf-8\r\n" +
+                        "Content-Length: ${response.length}\r\n" +
+                        "Connection: close\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n\r\n$response").toByteArray())
+                out.flush()
+                return
+            }
 
             if (path.startsWith("/local")) {
                 val idParamIndex = path.indexOf("id=")
@@ -603,5 +672,143 @@ object LocalMediaProxy {
         } finally {
             try { pfd?.close() } catch (e: Exception) {}
         }
+    }
+
+    private fun getTvReceiverHtml(): String {
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>CastBrowse Web Receiver</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body, html { width: 100%; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
+  #player-container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+  #idle-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at center, #181c24 0%, #08090c 100%); z-index: 10; text-align: center; padding: 24px; }
+  .logo { font-size: 3.2rem; font-weight: 900; letter-spacing: -1px; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px; }
+  .status-pill { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 9999px; padding: 6px 18px; font-size: 1rem; color: #93c5fd; margin-bottom: 24px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
+  .instructions { color: rgba(255,255,255,0.7); font-size: 1.25rem; max-width: 600px; line-height: 1.6; }
+  .instructions b { color: #fff; }
+  #osd { position: absolute; bottom: 40px; left: 40px; right: 40px; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 18px 24px; z-index: 20; opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
+  #osd.show { opacity: 1; }
+  #osd-title { font-size: 1.4rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
+  #osd-time { font-size: 0.95rem; color: #94a3b8; font-family: monospace; }
+</style>
+</head>
+<body>
+<div id="player-container">
+  <div id="idle-screen">
+    <div class="logo">CastBrowse</div>
+    <div class="status-pill"><div class="status-dot"></div> Web Receiver Ready</div>
+    <p class="instructions">Keep this browser tab open on your TV.<br>In CastBrowse, select <b>Web Receiver</b> or cast any video link to start watching.</p>
+  </div>
+  <video id="video" playsinline webkit-playsinline></video>
+  <div id="osd">
+    <div id="osd-title">Media Stream</div>
+    <div id="osd-time">00:00 / 00:00</div>
+  </div>
+</div>
+<script>
+  const video = document.getElementById('video');
+  const idleScreen = document.getElementById('idle-screen');
+  const osd = document.getElementById('osd');
+  const osdTitle = document.getElementById('osd-title');
+  const osdTime = document.getElementById('osd-time');
+
+  let currentUrl = '';
+  let lastCommandVersion = -1;
+  let osdTimeout = null;
+
+  function showOsd() {
+    osd.classList.add('show');
+    clearTimeout(osdTimeout);
+    osdTimeout = setTimeout(() => osd.classList.remove('show'), 3500);
+  }
+
+  function formatTime(sec) {
+    if (!sec || isNaN(sec)) return "00:00";
+    const s = Math.floor(sec % 60);
+    const m = Math.floor((sec / 60) % 60);
+    const h = Math.floor(sec / 3600);
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? pad(h) + ':' + pad(m) + ':' + pad(s) : pad(m) + ':' + pad(s);
+  }
+
+  video.addEventListener('timeupdate', () => {
+    osdTime.textContent = formatTime(video.currentTime) + ' / ' + formatTime(video.duration);
+  });
+
+  video.addEventListener('play', () => { idleScreen.style.display = 'none'; showOsd(); });
+  video.addEventListener('pause', () => showOsd());
+  document.addEventListener('mousemove', () => showOsd());
+  document.addEventListener('keydown', (e) => {
+    showOsd();
+    if (e.key === ' ' || e.key === 'MediaPlayPause') {
+      video.paused ? video.play() : video.pause();
+    } else if (e.key === 'ArrowRight') {
+      video.currentTime += 10;
+    } else if (e.key === 'ArrowLeft') {
+      video.currentTime = Math.max(0, video.currentTime - 10);
+    }
+  });
+
+  async function pollState() {
+    try {
+      const res = await fetch('/tv/api/state');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.version !== lastCommandVersion) {
+          lastCommandVersion = data.version;
+          if (data.url && data.url !== currentUrl) {
+            currentUrl = data.url;
+            video.src = data.url;
+            osdTitle.textContent = data.title || 'Streaming';
+            idleScreen.style.display = 'none';
+            video.play().catch(() => {});
+            showOsd();
+          }
+          if (data.command === 'pause') {
+            video.pause();
+          } else if (data.command === 'resume' || data.command === 'play') {
+            if (video.src) video.play().catch(() => {});
+          } else if (data.command === 'seek' && typeof data.seekTo === 'number') {
+            video.currentTime = data.seekTo;
+          } else if (data.command === 'stop') {
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
+            currentUrl = '';
+            idleScreen.style.display = 'flex';
+          }
+        }
+      }
+    } catch (e) {}
+
+    try {
+      if (video.src && currentUrl) {
+        await fetch('/tv/api/progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            currentTime: video.currentTime || 0,
+            duration: video.duration || 0,
+            state: video.paused ? 'paused' : 'playing'
+          })
+        });
+      }
+    } catch (e) {}
+  }
+
+  setInterval(pollState, 1000);
+  pollState();
+</script>
+</body>
+</html>
+        """.trimIndent()
     }
 }

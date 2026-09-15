@@ -1,5 +1,9 @@
 package com.castbrowse.app
 
+import android.content.Context
+import android.content.Intent
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.Toast
@@ -80,9 +84,12 @@ class CastWizardActivity : ComponentActivity() {
         isScanning = true
         discoveryJob?.cancel()
         discoveryJob = lifecycleScope.launch {
-            discoveryService.discoverFcastDevices().collectLatest { fcastList ->
-                fcastList.forEach { device ->
-                    if (discoveredDevices.none { it.ipAddress == device.ipAddress }) {
+            discoveryService.discoverUniversalDevices().collectLatest { devList ->
+                devList.forEach { device ->
+                    val existingIndex = discoveredDevices.indexOfFirst { it.ipAddress == device.ipAddress }
+                    if (existingIndex != -1) {
+                        discoveredDevices[existingIndex] = device
+                    } else {
                         discoveredDevices.add(device)
                     }
                 }
@@ -212,7 +219,7 @@ class CastWizardActivity : ComponentActivity() {
             Toast.makeText(this@CastWizardActivity, "Connecting to ${device.name}...", Toast.LENGTH_SHORT).show()
             
             val targetPort = if (device.port > 0) device.port else CastSessionManager.customFcastPort
-            val res = FCastClient.play(device.ipAddress, TEST_VIDEO_URL, "FCast Test Stream", targetPort) {
+            val res = CastSessionManager.play(device, TEST_VIDEO_URL, "${device.name} Test Stream") {
                 lifecycleScope.launch {
                     CastSessionManager.isMediaPlaying = false
                     CastSessionManager.activeMediaUrl = null
@@ -244,6 +251,12 @@ class CastWizardActivity : ComponentActivity() {
         var recentIps by remember { 
             mutableStateOf(CastSessionManager.getRecentIps(context)) 
         }
+        var reachabilityStatus by remember { mutableStateOf<String?>(null) }
+        val isVpnActive = remember { NetworkDiagnostics.isVpnActive(context) }
+        val localIp = remember { LocalMediaProxy.getLocalIpAddress() }
+        val tvUrl = remember(localIp) { "http://$localIp:${LocalMediaProxy.proxyPort}/tv" }
+        val isHotspot = remember { NetworkDiagnostics.isHotspotActive() }
+        val hotspotIp = remember { NetworkDiagnostics.getHotspotIp() }
 
         Scaffold(
             topBar = {
@@ -285,6 +298,31 @@ class CastWizardActivity : ComponentActivity() {
             ) {
                 item { Spacer(modifier = Modifier.height(8.dp)) }
 
+                // 0. VPN Alert Banner (if active)
+                if (isVpnActive) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.45f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text("Active VPN Detected", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.error)
+                                    Text(
+                                        "Local TVs and casting devices might not be reachable unless Local Network Sharing or Split-Tunneling is enabled in your VPN app.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 1. Current Active Session Card
                 item {
                     val activeDevice = CastSessionManager.castingDevice
@@ -312,7 +350,12 @@ class CastWizardActivity : ComponentActivity() {
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(if (CastSessionManager.isMediaPlaying) "Active FCast Session" else "Selected Receiver", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        val protoName = when (activeDevice.protocol) {
+                                            CastProtocol.DLNA -> "DLNA / Smart TV"
+                                            CastProtocol.WEB_RECEIVER -> "Web Receiver"
+                                            CastProtocol.FCAST -> "FCast Receiver"
+                                        }
+                                        Text(if (CastSessionManager.isMediaPlaying) "Active Stream ($protoName)" else "Selected Receiver ($protoName)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                         Text(activeDevice.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                         Text("${activeDevice.ipAddress}:${activeDevice.port}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
@@ -328,40 +371,36 @@ class CastWizardActivity : ComponentActivity() {
                                     }
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                if (CastSessionManager.isMediaPlaying) {
                                     Button(
                                         onClick = {
-                                            context.startActivity(android.content.Intent(context, CastControlActivity::class.java))
+                                            val intent = Intent(context, CastControlActivity::class.java)
+                                            context.startActivity(intent)
                                         },
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Icon(Icons.Default.Settings, contentDescription = "Controls", modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Open Controller")
+                                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Open Cast Controller")
                                     }
-                                    
-                                    Button(
+                                } else {
+                                    OutlinedButton(
                                         onClick = { playTestStream(activeDevice) },
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = "Test Video", modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Test Stream")
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Play Test Stream")
                                     }
                                 }
                             }
                         }
                     } else {
-                        OutlinedCard(
+                        Card(
                             shape = RoundedCornerShape(20.dp),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
@@ -377,21 +416,135 @@ class CastWizardActivity : ComponentActivity() {
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text("Not Connected", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                                    Text("Pair with a TV receiver below to start casting.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Select a Smart TV, Web Receiver, or FCast below.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
                     }
                 }
 
-                // 2. Network Discovered Targets (Moved to Top!)
+                // 2. Smart TV Web Receiver Card (/tv)
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(WebIcon, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(24.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Smart TV Web Receiver", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                    Text("Works on any TV or console browser (webOS, Tizen, PlayStation, Xbox, FireTV)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.background,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        tvUrl,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = {
+                                        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clip.setPrimaryClip(ClipData.newPlainText("TV URL", tvUrl))
+                                        Toast.makeText(context, "URL copied: $tvUrl", Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Icon(Icons.Default.Share, contentDescription = "Copy TV URL")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Hotspot / Travel Mode Card
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isHotspot) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)
+                                            else MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    TetheringIcon,
+                                    contentDescription = null,
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Hotspot / Travel Mode", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                    Text(
+                                        if (isHotspot) "Hotspot Active (Phone Gateway: $hotspotIp)" else "Cast in hotels without Wi-Fi router by enabling your phone hotspot.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (isHotspot) {
+                                    Button(
+                                        onClick = {
+                                            lifecycleScope.launch {
+                                                Toast.makeText(context, "Scanning hotspot devices...", Toast.LENGTH_SHORT).show()
+                                                val found = NetworkDiagnostics.scanHotspotSubnet()
+                                                found.forEach { dev ->
+                                                    if (discoveredDevices.none { it.ipAddress == dev.ipAddress }) {
+                                                        discoveredDevices.add(dev)
+                                                    }
+                                                }
+                                                Toast.makeText(context, "Found ${found.size} receiver(s)", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Scan Hotspot")
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        try {
+                                            val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Open Hotspot in Android Settings", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = if (isHotspot) Modifier else Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Hotspot Settings")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 4. Discovered Devices & TVs
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Local Network Targets", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
+                        Text("Discovered Devices & TVs", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black))
                         if (isScanning) {
                             val infiniteTransition = rememberInfiniteTransition(label = "pulse")
                             val angle by infiniteTransition.animateFloat(
@@ -413,7 +566,7 @@ class CastWizardActivity : ComponentActivity() {
                             )
                         } else {
                             TextButton(onClick = { startDeviceDiscovery() }) {
-                                Text("Scan Wifi")
+                                Text("Scan Network")
                             }
                         }
                     }
@@ -429,7 +582,7 @@ class CastWizardActivity : ComponentActivity() {
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (isScanning) "Searching Wifi..." else "No active receivers found on network",
+                                text = if (isScanning) "Searching DLNA, FCast & Web Receivers..." else "No active receivers found on network",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -437,6 +590,16 @@ class CastWizardActivity : ComponentActivity() {
                     }
                 } else {
                     items(discoveredDevices) { device ->
+                        val protocolLabel = when (device.protocol) {
+                            CastProtocol.DLNA -> "DLNA / Smart TV"
+                            CastProtocol.WEB_RECEIVER -> "Web Receiver"
+                            CastProtocol.FCAST -> "FCast"
+                        }
+                        val icon = when (device.protocol) {
+                            CastProtocol.DLNA -> TvIcon
+                            CastProtocol.WEB_RECEIVER -> WebIcon
+                            CastProtocol.FCAST -> CastIcon
+                        }
                         Card(
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -453,17 +616,25 @@ class CastWizardActivity : ComponentActivity() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Receiver",
-                                    tint = MaterialTheme.colorScheme.primary
+                                    imageVector = icon,
+                                    contentDescription = protocolLabel,
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.size(32.dp)
                                 )
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(device.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                    if (!device.modelName.isNullOrEmpty()) {
+                                        Text(
+                                            device.modelName,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                     Text(
-                                        text = "${device.ipAddress}:${device.port}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = "${device.ipAddress}:${device.port} • $protocolLabel",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -566,25 +737,58 @@ class CastWizardActivity : ComponentActivity() {
                         }
                     }
 
+                    if (reachabilityStatus != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = reachabilityStatus!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (reachabilityStatus!!.startsWith("✓")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Button(
-                        onClick = {
-                            val ip = manualIpText.trim()
-                            if (ip.isNotEmpty()) {
-                                val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
-                                val device = CastDevice("Manual Target", ip, port)
-                                CastSessionManager.castingDevice = device
-                                CastSessionManager.customFcastPort = port
-                                CastSessionManager.saveRecentIp(context, ip)
-                                recentIps = CastSessionManager.getRecentIps(context)
-                                Toast.makeText(context, "Selected receiver: $ip:$port", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Connect Receiver")
+                        Button(
+                            onClick = {
+                                val ip = manualIpText.trim()
+                                if (ip.isNotEmpty()) {
+                                    val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
+                                    val device = CastDevice("Manual Target", ip, port)
+                                    CastSessionManager.castingDevice = device
+                                    CastSessionManager.customFcastPort = port
+                                    CastSessionManager.saveRecentIp(context, ip)
+                                    recentIps = CastSessionManager.getRecentIps(context)
+                                    Toast.makeText(context, "Selected receiver: $ip:$port", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Connect")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val ip = manualIpText.trim()
+                                if (ip.isNotEmpty()) {
+                                    val port = fcastPortText.trim().toIntOrNull() ?: CastSessionManager.customFcastPort
+                                    lifecycleScope.launch {
+                                        reachabilityStatus = "Pinging $ip:$port..."
+                                        val result = NetworkDiagnostics.testReachability(ip, port)
+                                        reachabilityStatus = if (result.isReachable) "✓ ${result.message}" else "✗ ${result.message}"
+                                    }
+                                } else {
+                                    reachabilityStatus = "Enter an IP address to test"
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Test Ping")
+                        }
                     }
                 }
 
@@ -708,5 +912,161 @@ private val QrScannerIcon = androidx.compose.ui.graphics.vector.ImageVector.Buil
     ) {
         moveTo(6f, 12f)
         lineTo(18f, 12f)
+    }
+}.build()
+
+private val TvIcon = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+    name = "TvIcon",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+).apply {
+    path(
+        fill = SolidColor(Color(0xFF38BDF8)),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+    ) {
+        moveTo(21f, 3f)
+        horizontalLineTo(3f)
+        curveTo(1.9f, 3f, 1f, 3.9f, 1f, 5f)
+        verticalLineTo(17f)
+        curveTo(1f, 18.1f, 1.9f, 19f, 3f, 19f)
+        horizontalLineTo(8f)
+        verticalLineTo(21f)
+        horizontalLineTo(16f)
+        verticalLineTo(19f)
+        horizontalLineTo(21f)
+        curveTo(22.1f, 19f, 23f, 18.1f, 23f, 17f)
+        verticalLineTo(5f)
+        curveTo(23f, 3.9f, 22.1f, 3f, 21f, 3f)
+        close()
+        moveTo(21f, 17f)
+        horizontalLineTo(3f)
+        verticalLineTo(5f)
+        horizontalLineTo(21f)
+        verticalLineTo(17f)
+        close()
+    }
+}.build()
+
+private val CastIcon = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+    name = "CastIcon",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+).apply {
+    path(
+        fill = SolidColor(Color(0xFF818CF8)),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+    ) {
+        moveTo(1f, 18f)
+        verticalLineTo(21f)
+        horizontalLineTo(4f)
+        curveTo(4f, 19.34f, 2.66f, 18f, 1f, 18f)
+        close()
+        moveTo(1f, 14f)
+        verticalLineTo(16f)
+        curveTo(3.76f, 16f, 6f, 18.24f, 6f, 21f)
+        horizontalLineTo(8f)
+        curveTo(8f, 17.13f, 4.87f, 14f, 1f, 14f)
+        close()
+        moveTo(1f, 10f)
+        verticalLineTo(12f)
+        curveTo(5.97f, 12f, 10f, 16.03f, 10f, 21f)
+        horizontalLineTo(12f)
+        curveTo(12f, 14.92f, 7.07f, 10f, 1f, 10f)
+        close()
+        moveTo(21f, 3f)
+        horizontalLineTo(3f)
+        curveTo(1.9f, 3f, 1f, 3.9f, 1f, 5f)
+        verticalLineTo(8f)
+        horizontalLineTo(3f)
+        verticalLineTo(5f)
+        horizontalLineTo(21f)
+        verticalLineTo(19f)
+        horizontalLineTo(14f)
+        verticalLineTo(21f)
+        horizontalLineTo(21f)
+        curveTo(22.1f, 21f, 23f, 20.1f, 23f, 19f)
+        verticalLineTo(5f)
+        curveTo(23f, 3.9f, 22.1f, 3f, 21f, 3f)
+        close()
+    }
+}.build()
+
+private val WebIcon = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+    name = "WebIcon",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+).apply {
+    path(
+        fill = SolidColor(Color(0xFF34D399)),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+    ) {
+        moveTo(12f, 2f)
+        curveTo(6.48f, 2f, 2f, 6.48f, 2f, 12f)
+        curveTo(2f, 17.52f, 6.48f, 22f, 12f, 22f)
+        curveTo(17.52f, 22f, 22f, 17.52f, 22f, 12f)
+        curveTo(22f, 6.48f, 17.52f, 2f, 12f, 2f)
+        close()
+        moveTo(11f, 19.93f)
+        curveTo(7.05f, 19.44f, 4f, 16.08f, 4f, 12f)
+        curveTo(4f, 11.38f, 4.08f, 10.79f, 4.21f, 10.21f)
+        lineTo(9f, 15f)
+        verticalLineTo(16f)
+        curveTo(9f, 17.1f, 9.9f, 18f, 11f, 18f)
+        verticalLineTo(19.93f)
+        close()
+        moveTo(17.9f, 17.39f)
+        curveTo(17.64f, 16.58f, 16.9f, 16f, 16f, 16f)
+        horizontalLineTo(15f)
+        verticalLineTo(13f)
+        curveTo(15f, 12.45f, 14.55f, 12f, 14f, 12f)
+        horizontalLineTo(8f)
+        verticalLineTo(10f)
+        horizontalLineTo(10f)
+        curveTo(10.55f, 10f, 11f, 9.55f, 11f, 9f)
+        verticalLineTo(7f)
+        horizontalLineTo(14f)
+        curveTo(15.1f, 7f, 16f, 6.1f, 16f, 5f)
+        verticalLineTo(4.59f)
+        curveTo(18.93f, 6.15f, 20f, 9.17f, 20f, 12f)
+        curveTo(20f, 14.08f, 19.2f, 15.97f, 17.9f, 17.39f)
+        close()
+    }
+}.build()
+
+private val TetheringIcon = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+    name = "TetheringIcon",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+).apply {
+    path(
+        fill = SolidColor(Color(0xFFF59E0B)),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+    ) {
+        moveTo(12f, 11f)
+        curveTo(10.34f, 11f, 9f, 12.34f, 9f, 14f)
+        curveTo(9f, 15.66f, 10.34f, 17f, 12f, 17f)
+        curveTo(13.66f, 17f, 15f, 15.66f, 15f, 14f)
+        curveTo(15f, 12.34f, 13.66f, 11f, 12f, 11f)
+        close()
+        moveTo(12f, 7f)
+        curveTo(8.13f, 7f, 5f, 10.13f, 5f, 14f)
+        curveTo(5f, 15.93f, 5.78f, 17.68f, 7.05f, 18.95f)
+        lineTo(8.46f, 17.54f)
+        curveTo(7.55f, 16.63f, 7f, 15.38f, 7f, 14f)
+        curveTo(7f, 11.24f, 9.24f, 9f, 12f, 9f)
+        curveTo(14.76f, 9f, 17f, 11.24f, 17f, 14f)
+        curveTo(17f, 15.38f, 16.45f, 16.63f, 15.54f, 17.54f)
+        lineTo(16.95f, 18.95f)
+        curveTo(18.22f, 17.68f, 19f, 15.93f, 19f, 14f)
+        curveTo(19f, 10.13f, 15.87f, 7f, 12f, 7f)
+        close()
     }
 }.build()
