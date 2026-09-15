@@ -124,7 +124,7 @@ object NetworkDiagnostics {
      * Scans the hotspot subnet (192.168.43.2 to 192.168.43.30) for active receivers.
      */
     suspend fun scanHotspotSubnet(
-        ports: List<Int> = listOf(FCastClient.FCAST_DEFAULT_PORT, 8080, 7676, 55000)
+        ports: List<Int> = listOf(FCastClient.FCAST_DEFAULT_PORT, AirPlayClient.AIRPLAY_DEFAULT_PORT, 8080, 7676, 55000)
     ): List<CastDevice> = withContext(Dispatchers.IO) {
         val hotspotIp = getHotspotIp() ?: "192.168.43.1"
         val prefix = hotspotIp.substringBeforeLast(".") + "."
@@ -138,8 +138,16 @@ object NetworkDiagnostics {
                         try {
                             Socket().use { socket ->
                                 socket.connect(InetSocketAddress(targetIp, port), 250)
-                                val protocol = if (port == FCastClient.FCAST_DEFAULT_PORT) CastProtocol.FCAST else CastProtocol.DLNA
-                                val name = if (protocol == CastProtocol.FCAST) "FCast ($targetIp)" else "DLNA TV ($targetIp)"
+                                val protocol = when (port) {
+                                    FCastClient.FCAST_DEFAULT_PORT -> CastProtocol.FCAST
+                                    AirPlayClient.AIRPLAY_DEFAULT_PORT -> CastProtocol.AIRPLAY
+                                    else -> CastProtocol.DLNA
+                                }
+                                val name = when (protocol) {
+                                    CastProtocol.FCAST -> "FCast ($targetIp)"
+                                    CastProtocol.AIRPLAY -> "AirPlay ($targetIp)"
+                                    else -> "DLNA TV ($targetIp)"
+                                }
                                 synchronized(found) {
                                     if (found.none { it.ipAddress == targetIp }) {
                                         found.add(CastDevice(name = name, ipAddress = targetIp, port = port, protocol = protocol))

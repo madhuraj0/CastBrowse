@@ -62,6 +62,28 @@ object CastSessionManager {
                     onDisconnected = onDisconnected
                 )
             }
+            CastProtocol.AIRPLAY -> {
+                val targetPort = if (device.port > 0) device.port else AirPlayClient.AIRPLAY_DEFAULT_PORT
+                AirPlayClient.play(
+                    ipAddress = device.ipAddress,
+                    url = mediaUrl,
+                    title = title,
+                    port = targetPort,
+                    onDisconnected = onDisconnected
+                )
+            }
+            CastProtocol.DIAL -> {
+                val appUrl = device.applicationUrl ?: "http://${device.ipAddress}:${device.port}/apps"
+                val localIp = NetworkDiagnostics.getHotspotIp() ?: LocalMediaProxy.getLocalIpAddress()
+                val proxyWebReceiverUrl = "http://$localIp:${LocalMediaProxy.proxyPort}/tv"
+                DialClient.launchApp(appUrl, "WebBrowser", proxyWebReceiverUrl)
+                WebReceiverController.play(mediaUrl, title)
+                Result.success(Unit)
+            }
+            CastProtocol.GOOGLE_CAST -> {
+                WebReceiverController.play(mediaUrl, title)
+                Result.success(Unit)
+            }
             CastProtocol.WEB_RECEIVER -> {
                 WebReceiverController.play(mediaUrl, title)
                 Result.success(Unit)
@@ -84,7 +106,8 @@ object CastSessionManager {
         val device = castingDevice ?: return@withContext
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.pause()
-            CastProtocol.WEB_RECEIVER -> WebReceiverController.pause()
+            CastProtocol.AIRPLAY -> AirPlayClient.pause(device.ipAddress, device.port)
+            CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.pause()
             CastProtocol.FCAST -> FCastClient.pause(device.ipAddress, device.port)
         }
     }
@@ -93,7 +116,8 @@ object CastSessionManager {
         val device = castingDevice ?: return@withContext
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.resume()
-            CastProtocol.WEB_RECEIVER -> WebReceiverController.resume()
+            CastProtocol.AIRPLAY -> AirPlayClient.resume(device.ipAddress, device.port)
+            CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.resume()
             CastProtocol.FCAST -> FCastClient.resume(device.ipAddress, device.port)
         }
     }
@@ -102,7 +126,8 @@ object CastSessionManager {
         val device = castingDevice ?: return@withContext
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.seek(seconds)
-            CastProtocol.WEB_RECEIVER -> WebReceiverController.seek(seconds)
+            CastProtocol.AIRPLAY -> AirPlayClient.seek(seconds, device.ipAddress, device.port)
+            CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.seek(seconds)
             CastProtocol.FCAST -> FCastClient.seek(device.ipAddress, seconds, device.port)
         }
     }
@@ -112,7 +137,12 @@ object CastSessionManager {
         if (device != null) {
             when (device.protocol) {
                 CastProtocol.DLNA -> DlnaClient.stop()
-                CastProtocol.WEB_RECEIVER -> WebReceiverController.stop()
+                CastProtocol.AIRPLAY -> AirPlayClient.stop(device.ipAddress, device.port)
+                CastProtocol.DIAL -> {
+                    DialClient.stopApp()
+                    WebReceiverController.stop()
+                }
+                CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.stop()
                 CastProtocol.FCAST -> FCastClient.stop(device.ipAddress, device.port)
             }
         }
@@ -127,7 +157,8 @@ object CastSessionManager {
         val device = castingDevice ?: return@withContext
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.setVolume(volume)
-            CastProtocol.WEB_RECEIVER -> {
+            CastProtocol.AIRPLAY -> AirPlayClient.setVolume(volume, device.ipAddress, device.port)
+            CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> {
                 CastSessionManager.volume = volume
             }
             CastProtocol.FCAST -> FCastClient.setVolume(device.ipAddress, volume, device.port)

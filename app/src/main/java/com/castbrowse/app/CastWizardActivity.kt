@@ -352,6 +352,9 @@ class CastWizardActivity : ComponentActivity() {
                                     Column(modifier = Modifier.weight(1f)) {
                                         val protoName = when (activeDevice.protocol) {
                                             CastProtocol.DLNA -> "DLNA / Smart TV"
+                                            CastProtocol.AIRPLAY -> "AirPlay"
+                                            CastProtocol.DIAL -> "DIAL / Smart TV"
+                                            CastProtocol.GOOGLE_CAST -> "Google Cast"
                                             CastProtocol.WEB_RECEIVER -> "Web Receiver"
                                             CastProtocol.FCAST -> "FCast Receiver"
                                         }
@@ -582,7 +585,7 @@ class CastWizardActivity : ComponentActivity() {
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (isScanning) "Searching DLNA, FCast & Web Receivers..." else "No active receivers found on network",
+                                text = if (isScanning) "Searching DLNA, AirPlay, FCast & Smart TVs..." else "No active receivers found on network",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -592,11 +595,17 @@ class CastWizardActivity : ComponentActivity() {
                     items(discoveredDevices) { device ->
                         val protocolLabel = when (device.protocol) {
                             CastProtocol.DLNA -> "DLNA / Smart TV"
+                            CastProtocol.AIRPLAY -> "AirPlay"
+                            CastProtocol.DIAL -> "DIAL"
+                            CastProtocol.GOOGLE_CAST -> "Google Cast"
                             CastProtocol.WEB_RECEIVER -> "Web Receiver"
                             CastProtocol.FCAST -> "FCast"
                         }
                         val icon = when (device.protocol) {
                             CastProtocol.DLNA -> TvIcon
+                            CastProtocol.AIRPLAY -> AirPlayIcon
+                            CastProtocol.DIAL -> TvIcon
+                            CastProtocol.GOOGLE_CAST -> CastIcon
                             CastProtocol.WEB_RECEIVER -> WebIcon
                             CastProtocol.FCAST -> CastIcon
                         }
@@ -1067,6 +1076,42 @@ private val TetheringIcon = androidx.compose.ui.graphics.vector.ImageVector.Buil
         lineTo(16.95f, 18.95f)
         curveTo(18.22f, 17.68f, 19f, 15.93f, 19f, 14f)
         curveTo(19f, 10.13f, 15.87f, 7f, 12f, 7f)
+        close()
+    }
+}.build()
+
+private val AirPlayIcon = androidx.compose.ui.graphics.vector.ImageVector.Builder(
+    name = "AirPlayIcon",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+).apply {
+    path(
+        fill = SolidColor(Color(0xFF38BDF8)),
+        pathFillType = androidx.compose.ui.graphics.PathFillType.NonZero
+    ) {
+        moveTo(6f, 22f)
+        lineTo(18f, 22f)
+        lineTo(12f, 16f)
+        close()
+        moveTo(21f, 3f)
+        horizontalLineTo(3f)
+        curveTo(1.9f, 3f, 1f, 3.9f, 1f, 5f)
+        verticalLineTo(16f)
+        curveTo(1f, 17.1f, 1.9f, 18f, 3f, 18f)
+        horizontalLineTo(7f)
+        verticalLineTo(16f)
+        horizontalLineTo(3f)
+        verticalLineTo(5f)
+        horizontalLineTo(21f)
+        verticalLineTo(16f)
+        horizontalLineTo(17f)
+        verticalLineTo(18f)
+        horizontalLineTo(21f)
+        curveTo(22.1f, 18f, 23f, 17.1f, 23f, 16f)
+        verticalLineTo(5f)
+        curveTo(23f, 3.9f, 22.1f, 3f, 21f, 3f)
         close()
     }
 }.build()

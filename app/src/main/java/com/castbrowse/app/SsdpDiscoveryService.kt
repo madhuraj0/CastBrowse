@@ -25,6 +25,9 @@ import java.util.concurrent.TimeUnit
 enum class CastProtocol {
     FCAST,
     DLNA,
+    AIRPLAY,
+    DIAL,
+    GOOGLE_CAST,
     WEB_RECEIVER
 }
 
@@ -35,7 +38,8 @@ data class CastDevice(
     val protocol: CastProtocol = CastProtocol.FCAST,
     val controlUrl: String? = null,
     val renderingControlUrl: String? = null,
-    val modelName: String? = null
+    val modelName: String? = null,
+    val applicationUrl: String? = null
 )
 
 class SsdpDiscoveryService(private val context: Context) {
@@ -51,6 +55,8 @@ class SsdpDiscoveryService(private val context: Context) {
     companion object {
         private const val TAG = "SsdpDiscoveryService"
         private const val FCAST_SERVICE_TYPE = "_fcast._tcp."
+        private const val AIRPLAY_SERVICE_TYPE = "_airplay._tcp."
+        private const val GOOGLECAST_SERVICE_TYPE = "_googlecast._tcp."
         private const val SSDP_MULTICAST_ADDRESS = "239.255.255.250"
         private const val SSDP_PORT = 1900
     }
@@ -62,9 +68,12 @@ class SsdpDiscoveryService(private val context: Context) {
 
     /**
      * Discovers all supported casting devices on the local network:
-     * 1. FCast receivers via mDNS / DNS-SD
-     * 2. DLNA / UPnP MediaRenderers via SSDP multicast (Samsung, LG, Sony, Roku, etc.)
-     * 3. Connected HTML5 Web Receivers via LocalMediaProxy
+     * 1. FCast receivers via mDNS (_fcast._tcp.)
+     * 2. AirPlay video receivers via mDNS (_airplay._tcp.)
+     * 3. Google Cast / Chromecast via mDNS (_googlecast._tcp.)
+     * 4. DLNA / UPnP MediaRenderers via SSDP multicast
+     * 5. DIAL Smart TVs (Samsung, LG, Sony, Roku, etc.) via SSDP multicast
+     * 6. Connected HTML5 Web Receivers via LocalMediaProxy
      */
     fun discoverUniversalDevices(): Flow<List<CastDevice>> = callbackFlow {
         val discoveredDevices = mutableListOf<CastDevice>()
@@ -82,10 +91,12 @@ class SsdpDiscoveryService(private val context: Context) {
             synchronized(discoveredDevices) {
                 val existingIndex = discoveredDevices.indexOfFirst { it.ipAddress == device.ipAddress }
                 if (existingIndex != -1) {
-                    // Prefer DLNA/FCast with enriched names over generic ones
                     val existing = discoveredDevices[existingIndex]
-                    if (existing.name.startsWith("FCast") && !device.name.startsWith("FCast")) {
+                    // Prefer DLNA/AirPlay with enriched names over generic entries
+                    if (existing.protocol == CastProtocol.FCAST && device.protocol != CastProtocol.FCAST) {
                         discoveredDevices[existingIndex] = device
+                    } else if (device.applicationUrl != null && existing.applicationUrl == null) {
+                        discoveredDevices[existingIndex] = existing.copy(applicationUrl = device.applicationUrl)
                     }
                 } else {
                     discoveredDevices.add(device)
@@ -99,64 +110,69 @@ class SsdpDiscoveryService(private val context: Context) {
             updateAndEmit(it)
         }
 
-        // --- 1. mDNS Discovery for FCast ---
-        val discoveryListener = object : NsdManager.DiscoveryListener {
-            override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
-                Log.e(TAG, "mDNS Discovery start failed: $errorCode")
-            }
-
-            override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) {
-                Log.e(TAG, "mDNS Discovery stop failed: $errorCode")
-            }
-
-            override fun onDiscoveryStarted(serviceType: String?) {
-                Log.d(TAG, "mDNS discovery started")
-            }
-
-            override fun onDiscoveryStopped(serviceType: String?) {
-                Log.d(TAG, "mDNS discovery stopped")
-            }
-
-            override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
-                if (serviceInfo != null) {
-                    nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
-                            Log.e(TAG, "mDNS Resolve failed: $errorCode")
-                        }
-
-                        override fun onServiceResolved(resolvedInfo: NsdServiceInfo?) {
-                            val host = resolvedInfo?.host?.hostAddress ?: return
-                            val port = resolvedInfo.port
-                            val device = CastDevice(
-                                name = resolvedInfo.serviceName ?: "FCast Receiver",
-                                ipAddress = host,
-                                port = if (port > 0) port else FCastClient.FCAST_DEFAULT_PORT,
-                                protocol = CastProtocol.FCAST
-                            )
-                            updateAndEmit(device)
-                        }
-                    })
+        // Helper to register an NSD discovery listener for a given service type
+        fun createNsdListener(protocol: CastProtocol, defaultPort: Int, defaultName: String): NsdManager.DiscoveryListener {
+            return object : NsdManager.DiscoveryListener {
+                override fun onStartDiscoveryFailed(serviceType: String?, errorCode: Int) {
+                    Log.e(TAG, "$serviceType Discovery start failed: $errorCode")
                 }
-            }
 
-            override fun onServiceLost(serviceInfo: NsdServiceInfo?) {
-                if (serviceInfo != null) {
-                    synchronized(discoveredDevices) {
-                        discoveredDevices.removeAll { it.name == serviceInfo.serviceName }
-                        trySend(discoveredDevices.toList())
+                override fun onStopDiscoveryFailed(serviceType: String?, errorCode: Int) {
+                    Log.e(TAG, "$serviceType Discovery stop failed: $errorCode")
+                }
+
+                override fun onDiscoveryStarted(serviceType: String?) {
+                    Log.d(TAG, "$serviceType discovery started")
+                }
+
+                override fun onDiscoveryStopped(serviceType: String?) {
+                    Log.d(TAG, "$serviceType discovery stopped")
+                }
+
+                override fun onServiceFound(serviceInfo: NsdServiceInfo?) {
+                    if (serviceInfo != null) {
+                        nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
+                            override fun onResolveFailed(serviceInfo: NsdServiceInfo?, errorCode: Int) {
+                                Log.e(TAG, "mDNS Resolve failed for ${serviceInfo?.serviceName}: $errorCode")
+                            }
+
+                            override fun onServiceResolved(resolvedInfo: NsdServiceInfo?) {
+                                val host = resolvedInfo?.host?.hostAddress ?: return
+                                val port = resolvedInfo.port
+                                val name = resolvedInfo.serviceName ?: defaultName
+                                val device = CastDevice(
+                                    name = name,
+                                    ipAddress = host,
+                                    port = if (port > 0) port else defaultPort,
+                                    protocol = protocol
+                                )
+                                updateAndEmit(device)
+                            }
+                        })
+                    }
+                }
+
+                override fun onServiceLost(serviceInfo: NsdServiceInfo?) {
+                    if (serviceInfo != null) {
+                        synchronized(discoveredDevices) {
+                            discoveredDevices.removeAll { it.name == serviceInfo.serviceName }
+                            trySend(discoveredDevices.toList())
+                        }
                     }
                 }
             }
         }
 
-        try {
-            nsdManager.discoverServices(FCAST_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error starting NSD for FCast", e)
-        }
+        val fcastListener = createNsdListener(CastProtocol.FCAST, FCastClient.FCAST_DEFAULT_PORT, "FCast Receiver")
+        val airplayListener = createNsdListener(CastProtocol.AIRPLAY, AirPlayClient.AIRPLAY_DEFAULT_PORT, "AirPlay Receiver")
+        val googleCastListener = createNsdListener(CastProtocol.GOOGLE_CAST, 8009, "Google Cast Receiver")
 
-        // --- 2. SSDP Multicast Discovery for DLNA / UPnP ---
-        var ssdpJob: Job? = CoroutineScope(Dispatchers.IO).launch {
+        try { nsdManager.discoverServices(FCAST_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, fcastListener) } catch (e: Exception) {}
+        try { nsdManager.discoverServices(AIRPLAY_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, airplayListener) } catch (e: Exception) {}
+        try { nsdManager.discoverServices(GOOGLECAST_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, googleCastListener) } catch (e: Exception) {}
+
+        // --- SSDP Multicast Discovery for DLNA / UPnP and DIAL ---
+        val ssdpJob: Job = CoroutineScope(Dispatchers.IO).launch {
             try {
                 val group = InetAddress.getByName(SSDP_MULTICAST_ADDRESS)
                 MulticastSocket(null).use { socket ->
@@ -166,7 +182,8 @@ class SsdpDiscoveryService(private val context: Context) {
 
                     val searchTargets = listOf(
                         "urn:schemas-upnp-org:device:MediaRenderer:1",
-                        "urn:schemas-upnp-org:service:AVTransport:1"
+                        "urn:schemas-upnp-org:service:AVTransport:1",
+                        "urn:dial-multiscreen-org:service:dial:1"
                     )
 
                     for (target in searchTargets) {
@@ -191,16 +208,16 @@ class SsdpDiscoveryService(private val context: Context) {
                             socket.receive(recvPacket)
                             val response = String(recvPacket.data, 0, recvPacket.length, Charsets.UTF_8)
                             val location = extractHeader(response, "LOCATION")
+                            val appUrl = extractHeader(response, "APPLICATION-URL") ?: extractHeader(response, "X-APPLICATION-URL")
                             if (!location.isNullOrEmpty() && parsedLocations.add(location)) {
                                 launch(Dispatchers.IO) {
-                                    val dlnaDevice = resolveDlnaDevice(location)
+                                    val dlnaDevice = resolveDlnaDevice(location, appUrl)
                                     if (dlnaDevice != null) {
                                         updateAndEmit(dlnaDevice)
                                     }
                                 }
                             }
                         } catch (e: java.net.SocketTimeoutException) {
-                            // Timeout expected when no more packets arrive
                             break
                         } catch (e: Exception) {
                             break
@@ -208,17 +225,15 @@ class SsdpDiscoveryService(private val context: Context) {
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Error during SSDP DLNA scan", e)
+                Log.w(TAG, "Error during SSDP scan", e)
             }
         }
 
         awaitClose {
-            try {
-                nsdManager.stopServiceDiscovery(discoveryListener)
-            } catch (e: Exception) {
-                Log.w(TAG, "Error stopping NSD", e)
-            }
-            ssdpJob?.cancel()
+            try { nsdManager.stopServiceDiscovery(fcastListener) } catch (e: Exception) {}
+            try { nsdManager.stopServiceDiscovery(airplayListener) } catch (e: Exception) {}
+            try { nsdManager.stopServiceDiscovery(googleCastListener) } catch (e: Exception) {}
+            ssdpJob.cancel()
             try {
                 if (multicastLock?.isHeld == true) {
                     multicastLock.release()
@@ -243,7 +258,7 @@ class SsdpDiscoveryService(private val context: Context) {
         return null
     }
 
-    private fun resolveDlnaDevice(locationUrl: String): CastDevice? {
+    private fun resolveDlnaDevice(locationUrl: String, discoveredAppUrl: String? = null): CastDevice? {
         return try {
             val request = Request.Builder().url(locationUrl).build()
             val response = httpClient.newCall(request).execute()
@@ -258,21 +273,30 @@ class SsdpDiscoveryService(private val context: Context) {
             val port = if (uri.port > 0) uri.port else 80
 
             // Extract AVTransport controlURL
-            val avControlRelative = extractControlUrlForService(xml, "urn:schemas-upnp-org:service:AVTransport:1") ?: return null
-            val fullControlUrl = resolveUrl(locationUrl, avControlRelative)
+            val avControlRelative = extractControlUrlForService(xml, "urn:schemas-upnp-org:service:AVTransport:1")
+            val fullControlUrl = avControlRelative?.let { resolveUrl(locationUrl, it) }
 
             // Extract RenderingControl controlURL (optional, for volume)
             val renderingControlRelative = extractControlUrlForService(xml, "urn:schemas-upnp-org:service:RenderingControl:1")
             val fullRenderingUrl = renderingControlRelative?.let { resolveUrl(locationUrl, it) }
 
+            val appUrl = discoveredAppUrl ?: extractXmlValue(xml, "Application-URL")
+
+            val protocol = when {
+                fullControlUrl != null -> CastProtocol.DLNA
+                appUrl != null -> CastProtocol.DIAL
+                else -> CastProtocol.DLNA
+            }
+
             CastDevice(
                 name = friendlyName,
                 ipAddress = host,
                 port = port,
-                protocol = CastProtocol.DLNA,
+                protocol = protocol,
                 controlUrl = fullControlUrl,
                 renderingControlUrl = fullRenderingUrl,
-                modelName = modelName
+                modelName = modelName,
+                applicationUrl = appUrl
             )
         } catch (e: Exception) {
             null
