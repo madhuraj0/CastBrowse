@@ -30,6 +30,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -447,38 +448,33 @@ private val TabWindowIcon: ImageVector by lazy {
 private fun NavCircleButton(
     icon: ImageVector,
     contentDescription: String,
+    modifier: Modifier = Modifier,
     enabled: Boolean = true,
     tint: Color = MaterialTheme.colorScheme.onSurface,
+    isDark: Boolean = isSystemInDarkTheme(),
+    isAmoled: Boolean = false,
     onClick: () -> Unit
 ) {
-    Surface(
-        shape = CircleShape,
-        color = Color.Transparent,
-        border = GlassmorphicTheme.specularBorder(width = 1.dp),
-        shadowElevation = 3.dp,
-        modifier = Modifier
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
             .size(38.dp)
-            .background(
-                brush = Brush.radialGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.22f)
-                    )
-                ),
-                shape = CircleShape
+            .refractiveGlass(
+                shape = CircleShape,
+                isDark = isDark,
+                isAmoled = isAmoled,
+                elevation = 2.dp
             )
             .tactilePress {
                 if (enabled) onClick()
             }
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(19.dp),
-                tint = if (enabled) tint else tint.copy(alpha = 0.35f)
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(19.dp),
+            tint = if (enabled) tint else tint.copy(alpha = 0.35f)
+        )
     }
 }
 
@@ -1356,6 +1352,8 @@ class MainActivity : ComponentActivity() {
                                             icon = Icons.AutoMirrored.Filled.ArrowBack,
                                             contentDescription = "Back",
                                             enabled = webView?.canGoBack() == true,
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
                                             onClick = {
                                                 webView?.let { if (it.canGoBack()) it.goBack() }
                                                 showMoreActionsSheet = false
@@ -1367,6 +1365,8 @@ class MainActivity : ComponentActivity() {
                                             icon = Icons.AutoMirrored.Filled.ArrowForward,
                                             contentDescription = "Forward",
                                             enabled = webView?.canGoForward() == true,
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
                                             onClick = {
                                                 webView?.let { if (it.canGoForward()) it.goForward() }
                                                 showMoreActionsSheet = false
@@ -1378,6 +1378,8 @@ class MainActivity : ComponentActivity() {
                                             icon = Icons.Default.Star,
                                             contentDescription = "Bookmark",
                                             tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
                                             onClick = {
                                                 isBookmarked = BookmarkHelper.toggleBookmark(context, currentUrl, activeTab.title)
                                             }
@@ -1387,6 +1389,8 @@ class MainActivity : ComponentActivity() {
                                         NavCircleButton(
                                             icon = Icons.Default.Info,
                                             contentDescription = "Page info",
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
                                             onClick = {
                                                 showMoreActionsSheet = false
                                                 showPageInfoDialog = true
@@ -1397,6 +1401,8 @@ class MainActivity : ComponentActivity() {
                                         NavCircleButton(
                                             icon = Icons.Default.Refresh,
                                             contentDescription = "Reload",
+                                            isDark = isDark,
+                                            isAmoled = isAmoled,
                                             onClick = {
                                                 webView?.reload()
                                                 showMoreActionsSheet = false
@@ -1939,8 +1945,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         ) { paddingValues ->
-            val density = LocalDensity.current
-            val bottomNavPaddingPx = with(density) { paddingValues.calculateBottomPadding().roundToPx() }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1958,8 +1962,6 @@ class MainActivity : ComponentActivity() {
                     factory = { ctx ->
                         val wv = SecureWebView(ctx).apply {
                             webView = this
-                            clipToPadding = false
-                            setPadding(0, 0, 0, bottomNavPaddingPx)
                             webViewClient = MediaExtractorClient(
                                 isAdBlockEnabled = { isAdBlockEnabled },
                                 isDesktopMode = { isDesktopMode || currentUaMode == UserAgentManager.MODE_DESKTOP },
@@ -2114,11 +2116,6 @@ class MainActivity : ComponentActivity() {
                     update = { swipeRefresh ->
                         swipeRefresh.isRefreshing = isLoading
                         val view = webView ?: return@AndroidView
-
-                        if (view.paddingBottom != bottomNavPaddingPx) {
-                            view.clipToPadding = false
-                            view.setPadding(0, 0, 0, bottomNavPaddingPx)
-                        }
 
                         if (defaultUserAgent == null) {
                             defaultUserAgent = view.settings.userAgentString

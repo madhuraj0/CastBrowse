@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -58,17 +59,137 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 
+import android.os.Build
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import org.intellij.lang.annotations.Language
+
+/**
+ * Android Graphics Shading Language (AGSL) signed distance field (SDF) and normal calculation
+ * for rounded rectangular glass pane refraction (inspired by Kyant0/AndroidLiquidGlass & liquidGL).
+ */
+@Language("AGSL")
+private const val RoundedRectSDF = """
+float radiusAt(float2 coord, float4 radii) {
+    if (coord.x >= 0.0) {
+        if (coord.y <= 0.0) return radii.y;
+        else return radii.z;
+    } else {
+        if (coord.y <= 0.0) return radii.x;
+        else return radii.w;
+    }
+}
+
+float sdRoundedRect(float2 coord, float2 halfSize, float radius) {
+    float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
+    float outside = length(max(cornerCoord, 0.0)) - radius;
+    float inside = min(max(cornerCoord.x, cornerCoord.y), 0.0);
+    return outside + inside;
+}
+
+float2 gradSdRoundedRect(float2 coord, float2 halfSize, float radius) {
+    float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
+    if (cornerCoord.x >= 0.0 || cornerCoord.y >= 0.0) {
+        return sign(coord) * normalize(max(cornerCoord, 0.0));
+    } else {
+        float gradX = step(cornerCoord.y, cornerCoord.x);
+        return sign(coord) * float2(gradX, 1.0 - gradX);
+    }
+}
+"""
+
+/**
+ * Optical Liquid Glass Refraction Shader with 7-channel Chromatic Dispersion (AGSL)
+ * Calculates circular curvature lens mapping and prism chromatic dispersion across the bevel.
+ */
+@Language("AGSL")
+private const val RoundedRectRefractionWithDispersionShaderString = """
+uniform shader content;
+
+uniform float2 size;
+uniform float2 offset;
+uniform float4 cornerRadii;
+uniform float refractionHeight;
+uniform float refractionAmount;
+uniform float depthEffect;
+uniform float chromaticAberration;
+
+$RoundedRectSDF
+
+float circleMap(float x) {
+    return 1.0 - sqrt(1.0 - x * x);
+}
+
+half4 main(float2 coord) {
+    float2 halfSize = size * 0.5;
+    float2 centeredCoord = (coord + offset) - halfSize;
+    float radius = radiusAt(coord, cornerRadii);
+    
+    float sd = sdRoundedRect(centeredCoord, halfSize, radius);
+    if (-sd >= refractionHeight) {
+        return content.eval(coord);
+    }
+    sd = min(sd, 0.0);
+    
+    float d = circleMap(1.0 - -sd / refractionHeight) * refractionAmount;
+    float gradRadius = min(radius * 1.5, min(halfSize.x, halfSize.y));
+    float2 grad = normalize(gradSdRoundedRect(centeredCoord, halfSize, gradRadius) + depthEffect * normalize(centeredCoord));
+    
+    float2 refractedCoord = coord + d * grad;
+    float dispersionIntensity = chromaticAberration * ((centeredCoord.x * centeredCoord.y) / (halfSize.x * halfSize.y));
+    float2 dispersedCoord = d * grad * dispersionIntensity;
+    
+    half4 color = half4(0.0);
+    
+    half4 red = content.eval(refractedCoord + dispersedCoord);
+    color.r += red.r / 3.5;
+    color.a += red.a / 7.0;
+    
+    half4 orange = content.eval(refractedCoord + dispersedCoord * (2.0 / 3.0));
+    color.r += orange.r / 3.5;
+    color.g += orange.g / 7.0;
+    color.a += orange.a / 7.0;
+    
+    half4 yellow = content.eval(refractedCoord + dispersedCoord * (1.0 / 3.0));
+    color.r += yellow.r / 3.5;
+    color.g += yellow.g / 3.5;
+    color.a += yellow.a / 7.0;
+    
+    half4 green = content.eval(refractedCoord);
+    color.g += green.g / 3.5;
+    color.a += green.a / 7.0;
+    
+    half4 cyan = content.eval(refractedCoord - dispersedCoord * (1.0 / 3.0));
+    color.g += cyan.g / 3.5;
+    color.b += cyan.b / 3.0;
+    color.a += cyan.a / 7.0;
+    
+    half4 blue = content.eval(refractedCoord - dispersedCoord * (2.0 / 3.0));
+    color.b += blue.b / 3.0;
+    color.a += blue.a / 7.0;
+    
+    half4 purple = content.eval(refractedCoord - dispersedCoord);
+    color.r += purple.r / 7.0;
+    color.b += purple.b / 3.0;
+    color.a += purple.a / 7.0;
+    
+    return color;
+}
+"""
+
 /**
  * Premium Refractive Liquid Glass Design System
- * Provides multi-layer specular rim gradients, caustic highlights,
- * two-row chocolate bar bottom navigation, speed dial bookmarks,
- * and tactile fluid physics micro-animations.
+ * Inspired by liquidGL (WebGPU/WebGL) and Kyant0/AndroidLiquidGlass.
+ * Provides pure neutral optical translucency (no blue/indigo cast),
+ * Fresnel specular rim reflections, chromatic aberration,
+ * hardware-accelerated blur, and two-row chocolate bar navigation.
  */
 object GlassmorphicTheme {
 
     /**
-     * Pure optical translucent liquid glass color according to LiquidGL principles.
-     * Uniform attenuation without painted gradients, allowing content behind to be genuinely visible.
+     * Pure optical translucent liquid glass tint according to liquidGL principles.
+     * Uniform neutral optical attenuation without painted color gradients,
+     * ensuring high contrast and pristine readability.
      */
     fun liquidGlassColor(
         isDark: Boolean = true,
@@ -76,9 +197,10 @@ object GlassmorphicTheme {
         alphaMultiplier: Float = 1.0f
     ): Color {
         return when {
-            isAmoled -> Color(0xFF07080E).copy(alpha = (0.36f * alphaMultiplier).coerceIn(0f, 1f))
-            isDark -> Color(0xFF101422).copy(alpha = (0.32f * alphaMultiplier).coerceIn(0f, 1f))
-            else -> Color(0xFFFFFFFF).copy(alpha = (0.36f * alphaMultiplier).coerceIn(0f, 1f))
+            // Pure neutral optical glass tints - ZERO synthetic blue/indigo cast!
+            isAmoled -> Color(0xFF040404).copy(alpha = (0.50f * alphaMultiplier).coerceIn(0f, 1f))
+            isDark -> Color(0xFF141414).copy(alpha = (0.42f * alphaMultiplier).coerceIn(0f, 1f))
+            else -> Color(0xFFF6F7F9).copy(alpha = (0.48f * alphaMultiplier).coerceIn(0f, 1f))
         }
     }
 
@@ -101,14 +223,14 @@ object GlassmorphicTheme {
         width: Dp = 1.dp
     ): BorderStroke {
         val topHighlight = when {
-            isAmoled -> Color.White.copy(alpha = 0.22f)
-            isDark -> Color.White.copy(alpha = 0.26f)
-            else -> Color.White.copy(alpha = 0.65f)
+            isAmoled -> Color.White.copy(alpha = 0.30f)
+            isDark -> Color.White.copy(alpha = 0.35f)
+            else -> Color.White.copy(alpha = 0.75f)
         }
         val bottomShadow = when {
-            isAmoled -> Color.White.copy(alpha = 0.04f)
-            isDark -> Color.White.copy(alpha = 0.06f)
-            else -> Color.Black.copy(alpha = 0.06f)
+            isAmoled -> Color.White.copy(alpha = 0.03f)
+            isDark -> Color.White.copy(alpha = 0.05f)
+            else -> Color.Black.copy(alpha = 0.08f)
         }
         return BorderStroke(
             width = width,
@@ -119,7 +241,7 @@ object GlassmorphicTheme {
     }
 
     /**
-     * Card background with subtle ambient vertical gradient for depth (LiquidGL clean tint)
+     * Card background with uniform optical liquid glass tint (liquidGL: no painted gradients across glass)
      */
     fun cardGlassGradient(
         isDark: Boolean = true,
@@ -131,7 +253,7 @@ object GlassmorphicTheme {
 
     /**
      * Refractive specular rim border simulating liquid glass refraction.
-     * Delicate specular reflection at top-left edge fading to subtle caustic depth.
+     * Pure optical Fresnel reflection catching edge light with crisp high contrast.
      */
     fun refractiveBorder(
         isDark: Boolean = true,
@@ -139,14 +261,14 @@ object GlassmorphicTheme {
         width: Dp = 1.dp
     ): BorderStroke {
         val topHighlight = when {
-            isAmoled -> Color.White.copy(alpha = 0.28f)
-            isDark -> Color.White.copy(alpha = 0.32f)
-            else -> Color.White.copy(alpha = 0.70f)
+            isAmoled -> Color.White.copy(alpha = 0.38f)
+            isDark -> Color.White.copy(alpha = 0.42f)
+            else -> Color.White.copy(alpha = 0.85f)
         }
         val bottomShadow = when {
-            isAmoled -> Color.White.copy(alpha = 0.05f)
-            isDark -> Color.White.copy(alpha = 0.07f)
-            else -> Color.Black.copy(alpha = 0.07f)
+            isAmoled -> Color.White.copy(alpha = 0.04f)
+            isDark -> Color.White.copy(alpha = 0.06f)
+            else -> Color.Black.copy(alpha = 0.10f)
         }
         return BorderStroke(
             width = width,
@@ -157,7 +279,7 @@ object GlassmorphicTheme {
     }
 
     /**
-     * Refractive liquid glass brush (LiquidGL uniform translucent optical tint)
+     * Refractive liquid glass brush (liquidGL uniform translucent optical tint, no painted gradient)
      */
     fun refractiveGlassBrush(
         isDark: Boolean = true,
@@ -170,7 +292,7 @@ object GlassmorphicTheme {
 
 /**
  * Custom Compose Shape representing a dual-segment chocolate bar.
- * Features rounded corners and smooth convex curves meeting to a rounded depression
+ * Features rounded corners and smooth convex curves meeting to a rounded depression trough
  * on both left and right sides where the two rows are joined as one continuous unit.
  */
 class ChocolateBarShape(
@@ -192,52 +314,65 @@ class ChocolateBarShape(
         val waistY = h * waistFraction
 
         val path = Path().apply {
+            // Top edge & top-right corner
             moveTo(r, 0f)
             lineTo(w - r, 0f)
             quadraticBezierTo(w, 0f, w, r)
 
-            // Right waist: convex outer shoulder curves smoothly into the rounded depression at (w - nd, waistY),
-            // then curves convexly back out to rejoin w at waistY + nh.
+            // Right waist: outer vertical line descends to waistY - nh
             val rightNotchTop = (waistY - nh).coerceAtLeast(r)
             val rightNotchBottom = (waistY + nh).coerceAtMost(h - r)
             lineTo(w, rightNotchTop)
 
-            // Upper convex curve meeting rounded depression
+            // Convex outer curve meeting rounded depression trough:
+            // Top row curves inward convexly into the trough
             cubicTo(
-                w, waistY - nh * 0.42f,
-                w - nd, waistY - nh * 0.42f,
-                w - nd, waistY
+                w, waistY - nh * 0.45f,
+                w - nd * 0.25f, waistY - nh * 0.18f,
+                w - nd * 0.70f, waistY - nh * 0.06f
             )
-            // Rounded depression meeting lower convex curve
+            // Rounded concave depression trough at (w - nd, waistY)
+            quadraticBezierTo(
+                w - nd, waistY,
+                w - nd * 0.70f, waistY + nh * 0.06f
+            )
+            // Bottom row curves convexly outward to rejoin straight edge
             cubicTo(
-                w - nd, waistY + nh * 0.42f,
-                w, waistY + nh * 0.42f,
+                w - nd * 0.25f, waistY + nh * 0.18f,
+                w, waistY + nh * 0.45f,
                 w, rightNotchBottom
             )
 
+            // Bottom-right corner & bottom edge
             lineTo(w, h - r)
             quadraticBezierTo(w, h, w - r, h)
             lineTo(r, h)
             quadraticBezierTo(0f, h, 0f, h - r)
 
-            // Left waist: symmetrical convex curve meeting rounded depression
+            // Left waist: symmetrical convex curves meeting rounded depression trough
             val leftNotchBottom = (waistY + nh).coerceAtMost(h - r)
             val leftNotchTop = (waistY - nh).coerceAtLeast(r)
             lineTo(0f, leftNotchBottom)
 
-            // Lower convex curve meeting rounded depression
+            // Bottom row curves convexly inward toward depression
             cubicTo(
-                0f, waistY + nh * 0.42f,
-                nd, waistY + nh * 0.42f,
-                nd, waistY
+                0f, waistY + nh * 0.45f,
+                nd * 0.25f, waistY + nh * 0.18f,
+                nd * 0.70f, waistY + nh * 0.06f
             )
-            // Rounded depression meeting upper convex curve
+            // Rounded concave depression trough at (nd, waistY)
+            quadraticBezierTo(
+                nd, waistY,
+                nd * 0.70f, waistY - nh * 0.06f
+            )
+            // Top row curves convexly back outward to vertical edge
             cubicTo(
-                nd, waistY - nh * 0.42f,
-                0f, waistY - nh * 0.42f,
+                nd * 0.25f, waistY - nh * 0.18f,
+                0f, waistY - nh * 0.45f,
                 0f, leftNotchTop
             )
 
+            // Top-left corner
             lineTo(0f, r)
             quadraticBezierTo(0f, 0f, r, 0f)
             close()
@@ -247,7 +382,8 @@ class ChocolateBarShape(
 }
 
 /**
- * Modifier extension: Apply acrylic glassmorphic surface with specular rim border and shadow
+ * Modifier extension: Apply acrylic glassmorphic surface with specular rim border and shadow.
+ * Incorporates hardware blur on Android 12+ (API 31+).
  */
 fun Modifier.glassmorphic(
     shape: Shape = RoundedCornerShape(18.dp),
@@ -256,7 +392,22 @@ fun Modifier.glassmorphic(
     borderWidth: Dp = 1.dp,
     elevation: Dp = 8.dp
 ): Modifier = this
-    .shadow(elevation = elevation, shape = shape, clip = false)
+    .shadow(
+        elevation = elevation,
+        shape = shape,
+        clip = false,
+        ambientColor = Color.Black.copy(alpha = if (isDark) 0.35f else 0.08f),
+        spotColor = Color.Black.copy(alpha = if (isDark) 0.18f else 0.04f)
+    )
+    .graphicsLayer {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                renderEffect = android.graphics.RenderEffect.createBlurEffect(
+                    14f, 14f, android.graphics.Shader.TileMode.CLAMP
+                ).asComposeRenderEffect()
+            } catch (_: Throwable) {}
+        }
+    }
     .background(
         color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
         shape = shape
@@ -268,9 +419,12 @@ fun Modifier.glassmorphic(
     .clip(shape)
 
 /**
- * Modifier extension: Apply refractive liquid glass surface with specular rim,
- * caustic glow shadow, and translucent refractive backdrop.
- * Follows LiquidGL: uniform optical attenuation, no painted gradients.
+ * Modifier extension: Apply true refractive liquid glass surface.
+ * On Android 13+ (API 33+), runs full AGSL shader with rounded-rect circular lens refraction,
+ * 7-band chromatic dispersion, and chained blur (Kyant0/AndroidLiquidGlass & liquidGL).
+ * On Android 12+ (API 31+), applies hardware blur RenderEffect.
+ * On all versions, provides pure neutral optical translucency, Fresnel specular rim highlights,
+ * and delicate caustic depth shadows.
  */
 fun Modifier.refractiveGlass(
     shape: Shape = RoundedCornerShape(20.dp),
@@ -279,23 +433,67 @@ fun Modifier.refractiveGlass(
     borderWidth: Dp = 1.dp,
     elevation: Dp = 10.dp,
     glowColor: Color? = null
-): Modifier = this
-    .shadow(
-        elevation = elevation,
-        shape = shape,
-        clip = false,
-        ambientColor = if (isDark) Color.Black.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.08f),
-        spotColor = glowColor ?: (if (isDark) Color(0xFF6366F1).copy(alpha = 0.15f) else Color(0xFF6366F1).copy(alpha = 0.08f))
-    )
-    .background(
-        color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
-        shape = shape
-    )
-    .border(
-        border = GlassmorphicTheme.refractiveBorder(isDark, isAmoled, borderWidth),
-        shape = shape
-    )
-    .clip(shape)
+): Modifier = composed {
+    val density = LocalDensity.current
+
+    this
+        .shadow(
+            elevation = elevation,
+            shape = shape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = if (isDark) 0.38f else 0.08f),
+            spotColor = glowColor ?: Color.Black.copy(alpha = if (isDark) 0.18f else 0.04f)
+        )
+        .graphicsLayer {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    val w = size.width
+                    val h = size.height
+                    if (w > 0f && h > 0f) {
+                        val cornerRadius = with(density) {
+                            when (shape) {
+                                is RoundedCornerShape -> shape.topStart.toPx(size, density)
+                                is ChocolateBarShape -> shape.cornerRadius.toPx()
+                                else -> 20.dp.toPx()
+                            }
+                        }.coerceAtMost(minOf(w, h) / 2f)
+
+                        val shader = android.graphics.RuntimeShader(RoundedRectRefractionWithDispersionShaderString).apply {
+                            setFloatUniform("size", w, h)
+                            setFloatUniform("offset", 0f, 0f)
+                            setFloatUniform("cornerRadii", cornerRadius, cornerRadius, cornerRadius, cornerRadius)
+                            setFloatUniform("refractionHeight", with(density) { 14.dp.toPx() })
+                            setFloatUniform("refractionAmount", with(density) { -10.dp.toPx() })
+                            setFloatUniform("depthEffect", 0.85f)
+                            setFloatUniform("chromaticAberration", 0.75f)
+                        }
+                        val refractionEffect = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+                        val blurEffect = android.graphics.RenderEffect.createBlurEffect(14f, 14f, android.graphics.Shader.TileMode.CLAMP)
+                        renderEffect = android.graphics.RenderEffect.createChainEffect(refractionEffect, blurEffect).asComposeRenderEffect()
+                    }
+                } catch (_: Throwable) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            renderEffect = android.graphics.RenderEffect.createBlurEffect(16f, 16f, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
+                        } catch (_: Throwable) {}
+                    }
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                try {
+                    renderEffect = android.graphics.RenderEffect.createBlurEffect(16f, 16f, android.graphics.Shader.TileMode.CLAMP).asComposeRenderEffect()
+                } catch (_: Throwable) {}
+            }
+        }
+        .background(
+            color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
+            shape = shape
+        )
+        .border(
+            border = GlassmorphicTheme.refractiveBorder(isDark, isAmoled, borderWidth),
+            shape = shape
+        )
+        .clip(shape)
+}
 
 /**
  * Tactile fluid micro-interaction: subtle scale-down on press with seamless fluid easing release (no bounce)
@@ -360,7 +558,7 @@ data class SpeedDialItem(
     val title: String,
     val url: String,
     val iconEmoji: String = "🌐",
-    val accentColor: Long = 0xFF6366F1,
+    val accentColor: Long = 0xFF71717A,
     val isDefault: Boolean = false
 )
 
@@ -393,7 +591,7 @@ object SpeedDialManager {
                         title = obj.getString("title"),
                         url = obj.getString("url"),
                         iconEmoji = obj.optString("icon", "🌐"),
-                        accentColor = obj.optLong("color", 0xFF6366F1),
+                        accentColor = obj.optLong("color", 0xFF71717A),
                         isDefault = obj.optBoolean("isDefault", false)
                     )
                 )
@@ -490,8 +688,8 @@ fun ChocolateBottomBar(
             }
 
             // Chocolate Bar Waist Snap Groove (Refractive etched specular horizontal divider)
-            val grooveShadow = if (isDark) Color.Black.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.08f)
-            val grooveHighlight = if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.40f)
+            val grooveShadow = if (isDark) Color.Black.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.12f)
+            val grooveHighlight = if (isDark) Color.White.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.60f)
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -541,7 +739,9 @@ fun ChocolateBottomBar(
                     label = "indicatorBreathAlpha"
                 )
 
-                // Liquid sliding selection pill indicator - uniform liquid tint, no gradient (LiquidGL)
+                // Liquid sliding selection pill indicator - pure neutral optical frosted glass (liquidGL)
+                val pillColor = if (isDark) Color.White.copy(alpha = breathAlpha) else Color.Black.copy(alpha = breathAlpha * 0.7f)
+                val pillBorderColor = if (isDark) Color.White.copy(alpha = (breathAlpha * 1.5f).coerceAtMost(0.50f)) else Color.Black.copy(alpha = (breathAlpha * 1.2f).coerceAtMost(0.35f))
                 Box(
                     modifier = Modifier
                         .offset(x = indicatorOffset)
@@ -550,12 +750,12 @@ fun ChocolateBottomBar(
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = breathAlpha),
+                            color = pillColor,
                             shape = RoundedCornerShape(20.dp)
                         )
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = (breathAlpha * 1.6f).coerceAtMost(0.55f)),
+                            color = pillBorderColor,
                             shape = RoundedCornerShape(20.dp)
                         )
                 )
@@ -577,19 +777,19 @@ fun ChocolateBottomBar(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            val activeTextColor = if (isDark) Color.White else Color.Black
+                            val inactiveTextColor = if (isDark) Color.White.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.60f)
                             Icon(
                                 imageVector = Icons.Default.Home,
                                 contentDescription = "Browser",
-                                tint = if (currentNavTab == 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                tint = if (currentNavTab == 0) activeTextColor else inactiveTextColor,
                                 modifier = Modifier.size(19.dp)
                             )
                             Text(
                                 text = "Browser",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (currentNavTab == 0) FontWeight.Bold else FontWeight.Medium,
-                                color = if (currentNavTab == 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                color = if (currentNavTab == 0) activeTextColor else inactiveTextColor
                             )
                         }
                     }
@@ -607,6 +807,8 @@ fun ChocolateBottomBar(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            val activeTextColor = if (isDark) Color.White else Color.Black
+                            val inactiveTextColor = if (isDark) Color.White.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.60f)
                             BadgedBox(
                                 badge = {
                                     if (extractedVideoCount > 0) {
@@ -625,8 +827,7 @@ fun ChocolateBottomBar(
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
                                     contentDescription = "Stream",
-                                    tint = if (currentNavTab == 1) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    tint = if (currentNavTab == 1) activeTextColor else inactiveTextColor,
                                     modifier = Modifier.size(19.dp)
                                 )
                             }
@@ -634,8 +835,7 @@ fun ChocolateBottomBar(
                                 text = "Stream",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (currentNavTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                color = if (currentNavTab == 1) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                color = if (currentNavTab == 1) activeTextColor else inactiveTextColor
                             )
                         }
                     }
@@ -704,7 +904,9 @@ fun FloatingGlassmorphicBottomBar(
                     label = "singleBarBreathAlpha"
                 )
 
-                // Liquid sliding selection pill indicator - uniform liquid tint, no gradient (LiquidGL)
+                // Liquid sliding selection pill indicator - pure neutral optical frosted glass (liquidGL)
+                val pillColor = if (isDark) Color.White.copy(alpha = breathAlpha) else Color.Black.copy(alpha = breathAlpha * 0.7f)
+                val pillBorderColor = if (isDark) Color.White.copy(alpha = (breathAlpha * 1.5f).coerceAtMost(0.50f)) else Color.Black.copy(alpha = (breathAlpha * 1.2f).coerceAtMost(0.35f))
                 Box(
                     modifier = Modifier
                         .offset(x = indicatorOffset)
@@ -713,12 +915,12 @@ fun FloatingGlassmorphicBottomBar(
                         .padding(2.dp)
                         .clip(RoundedCornerShape(22.dp))
                         .background(
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = breathAlpha),
+                            color = pillColor,
                             shape = RoundedCornerShape(22.dp)
                         )
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = (breathAlpha * 1.6f).coerceAtMost(0.55f)),
+                            color = pillBorderColor,
                             shape = RoundedCornerShape(22.dp)
                         )
                 )
@@ -727,6 +929,9 @@ fun FloatingGlassmorphicBottomBar(
                     modifier = Modifier.fillMaxSize(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val activeTextColor = if (isDark) Color.White else Color.Black
+                    val inactiveTextColor = if (isDark) Color.White.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.60f)
+
                     // Browser Tab
                     Box(
                         modifier = Modifier
@@ -743,16 +948,14 @@ fun FloatingGlassmorphicBottomBar(
                             Icon(
                                 imageVector = Icons.Default.Home,
                                 contentDescription = "Browser",
-                                tint = if (currentNavTab == 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                tint = if (currentNavTab == 0) activeTextColor else inactiveTextColor,
                                 modifier = Modifier.size(20.dp)
                             )
                             Text(
                                 text = "Browser",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (currentNavTab == 0) FontWeight.Bold else FontWeight.Medium,
-                                color = if (currentNavTab == 0) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                color = if (currentNavTab == 0) activeTextColor else inactiveTextColor
                             )
                         }
                     }
@@ -788,8 +991,7 @@ fun FloatingGlassmorphicBottomBar(
                                 Icon(
                                     imageVector = Icons.Default.PlayArrow,
                                     contentDescription = "Media Hub",
-                                    tint = if (currentNavTab == 1) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    tint = if (currentNavTab == 1) activeTextColor else inactiveTextColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -797,8 +999,7 @@ fun FloatingGlassmorphicBottomBar(
                                 text = "Media Hub",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (currentNavTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                color = if (currentNavTab == 1) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                color = if (currentNavTab == 1) activeTextColor else inactiveTextColor
                             )
                         }
                     }
@@ -807,6 +1008,7 @@ fun FloatingGlassmorphicBottomBar(
         }
     }
 }
+
 
 /**
  * Home & New Tab Speed Dial Screen
@@ -982,7 +1184,7 @@ fun SpeedDialHomeScreen(
                     title = "Add",
                     url = "",
                     iconEmoji = "➕",
-                    accentColor = 0xFF6366F1
+                    accentColor = 0xFF71717A
                 )
             )
 
@@ -1023,14 +1225,7 @@ fun SpeedDialHomeScreen(
                                             isDark = isDark,
                                             isAmoled = isAmoled,
                                             elevation = 6.dp,
-                                            glowColor = if (!isAddTile) tileColor.copy(alpha = 0.35f) else null
-                                        )
-                                        .background(
-                                            if (isAddTile) {
-                                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                                            } else {
-                                                tileColor.copy(alpha = if (isDark) 0.22f else 0.14f)
-                                            }
+                                            glowColor = if (!isAddTile) tileColor.copy(alpha = 0.25f) else null
                                         ),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1101,6 +1296,8 @@ fun SpeedDialHomeScreen(
         if (showAddDialog) {
             AddShortcutDialog(
                 onDismiss = { showAddDialog = false },
+                isDark = isDark,
+                isAmoled = isAmoled,
                 onAdd = { newItem ->
                     SpeedDialManager.saveShortcut(context, newItem)
                     shortcuts = SpeedDialManager.loadShortcuts(context)
@@ -1113,6 +1310,13 @@ fun SpeedDialHomeScreen(
         itemToDelete?.let { item ->
             AlertDialog(
                 onDismissRequest = { itemToDelete = null },
+                containerColor = Color.Transparent,
+                modifier = Modifier.refractiveGlass(
+                    shape = RoundedCornerShape(24.dp),
+                    isDark = isDark,
+                    isAmoled = isAmoled,
+                    elevation = 20.dp
+                ),
                 title = { Text("Remove Shortcut?") },
                 text = { Text("Are you sure you want to remove '${item.title}' from your bookmarks?") },
                 confirmButton = {
@@ -1142,6 +1346,8 @@ fun SpeedDialHomeScreen(
 @Composable
 fun AddShortcutDialog(
     onDismiss: () -> Unit,
+    isDark: Boolean = isSystemInDarkTheme(),
+    isAmoled: Boolean = false,
     onAdd: (SpeedDialItem) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
@@ -1151,6 +1357,13 @@ fun AddShortcutDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = Color.Transparent,
+        modifier = Modifier.refractiveGlass(
+            shape = RoundedCornerShape(24.dp),
+            isDark = isDark,
+            isAmoled = isAmoled,
+            elevation = 20.dp
+        ),
         title = { Text("Add Bookmark Shortcut", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

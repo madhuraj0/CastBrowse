@@ -663,6 +663,15 @@ class MediaExtractorClient(
         if (isAdBlockEnabled()) {
             view?.evaluateJavascript(COSMETIC_ADBLOCK_CSS, null)
         }
+
+        // Allow bottom of webpage content to clear floating refractive glass bar when scrolled
+        view?.evaluateJavascript("""
+            (function() {
+                try {
+                    document.documentElement.style.scrollPaddingBottom = '90px';
+                } catch(e) {}
+            })();
+        """.trimIndent(), null)
         
         if (isDesktopMode()) {
             val desktopViewportScript = """

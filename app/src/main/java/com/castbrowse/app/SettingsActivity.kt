@@ -446,6 +446,13 @@ fun SettingsScreen(
     if (showPrivacyDialog) {
         AlertDialog(
             onDismissRequest = { showPrivacyDialog = false },
+            containerColor = Color.Transparent,
+            modifier = Modifier.refractiveGlass(
+                shape = RoundedCornerShape(24.dp),
+                isDark = isDark,
+                isAmoled = isAmoled,
+                elevation = 20.dp
+            ),
             title = { Text("Privacy", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -460,7 +467,7 @@ fun SettingsScreen(
                     Text("Close")
                 }
             },
-            shape = RoundedCornerShape(20.dp)
+            shape = RoundedCornerShape(24.dp)
         )
     }
 
@@ -468,6 +475,13 @@ fun SettingsScreen(
     if (showCreditsDialog) {
         AlertDialog(
             onDismissRequest = { showCreditsDialog = false },
+            containerColor = Color.Transparent,
+            modifier = Modifier.refractiveGlass(
+                shape = RoundedCornerShape(24.dp),
+                isDark = isDark,
+                isAmoled = isAmoled,
+                elevation = 20.dp
+            ),
             title = { Text("Credits", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -482,7 +496,7 @@ fun SettingsScreen(
                     Text("Close")
                 }
             },
-            shape = RoundedCornerShape(20.dp)
+            shape = RoundedCornerShape(24.dp)
         )
     }
 
@@ -490,6 +504,14 @@ fun SettingsScreen(
     if (showClearSessionDialog) {
         AlertDialog(
             onDismissRequest = { showClearSessionDialog = false },
+            containerColor = Color.Transparent,
+            modifier = Modifier.refractiveGlass(
+                shape = RoundedCornerShape(24.dp),
+                isDark = isDark,
+                isAmoled = isAmoled,
+                elevation = 20.dp,
+                glowColor = MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+            ),
             title = { Text("Clear Session?", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
             text = {
                 Text(
@@ -516,7 +538,7 @@ fun SettingsScreen(
                     Text("Cancel")
                 }
             },
-            shape = RoundedCornerShape(20.dp)
+            shape = RoundedCornerShape(24.dp)
         )
     }
 }
