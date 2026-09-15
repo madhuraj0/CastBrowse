@@ -676,7 +676,7 @@ class MainActivity : ComponentActivity() {
                 cleanUrl.contains(".mp4", ignoreCase = true)
     }
 
-    private fun castToDevice(device: CastDevice, videoUrl: String, videoTitle: String, customFCastPort: Int) {
+    private fun castToDevice(device: CastDevice, videoUrl: String, videoTitle: String, customFCastPort: Int, resumePosition: Double = 0.0) {
         lifecycleScope.launch {
             CastSessionManager.isCasting = true
             val targetPort = if (device.port > 0) device.port else customFCastPort
@@ -732,6 +732,14 @@ class MainActivity : ComponentActivity() {
                 CastSessionManager.customFcastPort = targetPort
                 CastSessionManager.saveRecentIp(this@MainActivity, device.ipAddress)
 
+                // If resuming from a previous timestamp, seek after receiver initializes media
+                if (resumePosition > 15.0) {
+                    lifecycleScope.launch {
+                        delay(1200)
+                        CastSessionManager.seek(resumePosition)
+                    }
+                }
+
                 // Keep screen-lock background casting alive via Foreground Service + WakeLock
                 CastPlaybackService.start(
                     context = this@MainActivity,
@@ -742,7 +750,12 @@ class MainActivity : ComponentActivity() {
                     url = proxiedUrl
                 )
 
-                Toast.makeText(this@MainActivity, "Playing on ${device.name}!", Toast.LENGTH_LONG).show()
+                val statusMsg = if (resumePosition > 15.0) {
+                    "Resumed from ${PlaybackResumeManager.formatTime(resumePosition)} on ${device.name}!"
+                } else {
+                    "Playing on ${device.name}!"
+                }
+                Toast.makeText(this@MainActivity, statusMsg, Toast.LENGTH_LONG).show()
                 showCastDialog = false
             }.onFailure { e ->
                 Toast.makeText(this@MainActivity, "Casting failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
@@ -2397,17 +2410,52 @@ class MainActivity : ComponentActivity() {
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    Button(
-                                        onClick = {
-                                            selectedVideoToCast?.let { video ->
-                                                val portToUse = if (activeDevice.port > 0) activeDevice.port else CastSessionManager.customFcastPort
-                                                castToDevice(activeDevice, video.url, video.title, portToUse)
-                                            }
-                                        },
-                                        enabled = selectedVideoToCast != null,
-                                        shape = RoundedCornerShape(12.dp)
+                                    val savedPos = selectedVideoToCast?.let { PlaybackResumeManager.getSavedPosition(context, it.url) } ?: 0.0
+                                    Column(
+                                        horizontalAlignment = Alignment.End,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text("Cast Now")
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    selectedVideoToCast?.let { video ->
+                                                        CastSessionManager.addToQueue(video)
+                                                        Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                enabled = selectedVideoToCast != null,
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text("Queue")
+                                            }
+
+                                            Button(
+                                                onClick = {
+                                                    selectedVideoToCast?.let { video ->
+                                                        val portToUse = if (activeDevice.port > 0) activeDevice.port else CastSessionManager.customFcastPort
+                                                        castToDevice(activeDevice, video.url, video.title, portToUse)
+                                                    }
+                                                },
+                                                enabled = selectedVideoToCast != null,
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text(if (savedPos > 15.0) "Cast 0:00" else "Cast Now")
+                                            }
+                                        }
+
+                                        if (savedPos > 15.0) {
+                                            FilledTonalButton(
+                                                onClick = {
+                                                    selectedVideoToCast?.let { video ->
+                                                        val portToUse = if (activeDevice.port > 0) activeDevice.port else CastSessionManager.customFcastPort
+                                                        castToDevice(activeDevice, video.url, video.title, portToUse, resumePosition = savedPos)
+                                                    }
+                                                },
+                                                shape = RoundedCornerShape(12.dp)
+                                            ) {
+                                                Text("Resume (${PlaybackResumeManager.formatTime(savedPos)})")
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3161,6 +3209,16 @@ private fun WebStreamCard(
 
                     OutlinedButton(
                         onClick = {
+                            CastSessionManager.addToQueue(video)
+                            Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Queue")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
                             val mime = when {
                                 video.url.contains(".m3u8") -> "application/x-mpegURL"
                                 video.url.contains(".mpd") -> "application/dash+xml"
@@ -3301,6 +3359,24 @@ private fun DeviceVideoCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Cast to TV", fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val mime = context.contentResolver.getType(item.uri) ?: "video/mp4"
+                        val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+                            uri = item.uri,
+                            title = item.title,
+                            mimeType = mime,
+                            size = item.size,
+                            receiverIp = CastSessionManager.castingDevice?.ipAddress
+                        )
+                        CastSessionManager.addToQueue(ExtractedVideo(proxiedUrl, item.title))
+                        Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Queue")
                 }
 
                 OutlinedButton(

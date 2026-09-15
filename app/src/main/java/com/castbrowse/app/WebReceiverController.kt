@@ -98,6 +98,42 @@ object WebReceiverController {
         Log.d(TAG, "WebReceiver: Dispatched seek command to $seconds s")
     }
 
+    @Volatile
+    var isLoopEnabled: Boolean = false
+
+    @Volatile
+    var aspectRatio: String = "16:9"
+
+    @Volatile
+    var audioDelayMs: Int = 0
+
+    @Volatile
+    var subtitleUrl: String? = null
+
+    @Volatile
+    var subtitleOffsetMs: Int = 0
+
+    fun setSubtitle(url: String?, offsetMs: Int = 0) {
+        subtitleUrl = url
+        subtitleOffsetMs = offsetMs
+        commandVersion++
+    }
+
+    fun updateAspectRatio(ratio: String) {
+        aspectRatio = ratio
+        commandVersion++
+    }
+
+    fun setAudioDelay(delayMs: Int) {
+        audioDelayMs = delayMs
+        commandVersion++
+    }
+
+    fun setLoop(enabled: Boolean) {
+        isLoopEnabled = enabled
+        commandVersion++
+    }
+
     fun getStateJson(): String {
         return buildJsonObject {
             put("url", activeMediaUrl ?: "")
@@ -105,6 +141,11 @@ object WebReceiverController {
             put("command", pendingCommand ?: "")
             put("seekTo", pendingSeekTime)
             put("version", commandVersion)
+            put("loop", isLoopEnabled)
+            put("aspectRatio", aspectRatio)
+            put("audioDelayMs", audioDelayMs)
+            put("subtitleUrl", subtitleUrl ?: "")
+            put("subtitleOffsetMs", subtitleOffsetMs)
         }.toString()
     }
 
@@ -130,6 +171,7 @@ object WebReceiverController {
                 "ended" -> {
                     CastSessionManager.isMediaPlaying = false
                     CastSessionManager.playbackState = 0
+                    CastSessionManager.onPlaybackFinished()
                 }
             }
         } catch (e: Exception) {

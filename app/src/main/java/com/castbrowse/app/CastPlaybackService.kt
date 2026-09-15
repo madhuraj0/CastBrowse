@@ -8,28 +8,35 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Foreground Service that holds a partial WakeLock and high-performance WifiLock
- * while media is casting to an FCast receiver. This prevents Android Doze mode and
- * screen-lock power savings from dropping the TCP socket and media proxy stream.
+ * Foreground Service integrating Android MediaSession for system media controls
+ * (lock screen, notification slider, Quick Settings carousel) while holding partial
+ * WakeLock and high-performance WifiLock to protect continuous streaming.
  */
 class CastPlaybackService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var mediaSession: MediaSession? = null
+    private var progressJob: Job? = null
 
     private var currentTitle: String = "Media Stream"
     private var currentDeviceName: String = "FCast Receiver"
@@ -45,6 +52,9 @@ class CastPlaybackService : Service() {
         const val ACTION_START = "com.castbrowse.app.action.START_CAST"
         const val ACTION_STOP = "com.castbrowse.app.action.STOP_CAST"
         const val ACTION_TOGGLE_PLAY_PAUSE = "com.castbrowse.app.action.TOGGLE_PLAY_PAUSE"
+        const val ACTION_REWIND = "com.castbrowse.app.action.REWIND"
+        const val ACTION_FAST_FORWARD = "com.castbrowse.app.action.FAST_FORWARD"
+        const val ACTION_SKIP_NEXT = "com.castbrowse.app.action.SKIP_NEXT"
         const val ACTION_UPDATE_STATE = "com.castbrowse.app.action.UPDATE_STATE"
 
         const val EXTRA_TITLE = "extra_title"
@@ -101,8 +111,45 @@ class CastPlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        CastSessionManager.appContext = applicationContext
         createNotificationChannel()
         acquireWakeAndWifiLocks()
+        initMediaSession()
+    }
+
+    private fun initMediaSession() {
+        mediaSession = MediaSession(this, "CastBrowsePlayback").apply {
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() {
+                    handleResume()
+                }
+
+                override fun onPause() {
+                    handlePause()
+                }
+
+                override fun onSeekTo(pos: Long) {
+                    handleSeek(pos / 1000.0)
+                }
+
+                override fun onFastForward() {
+                    handleJump(30.0)
+                }
+
+                override fun onRewind() {
+                    handleJump(-30.0)
+                }
+
+                override fun onSkipToNext() {
+                    handleSkipNext()
+                }
+
+                override fun onStop() {
+                    handleStop()
+                }
+            })
+            isActive = true
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -120,6 +167,15 @@ class CastPlaybackService : Service() {
             }
             ACTION_TOGGLE_PLAY_PAUSE -> {
                 handleTogglePlayPause()
+            }
+            ACTION_REWIND -> {
+                handleJump(-10.0)
+            }
+            ACTION_FAST_FORWARD -> {
+                handleJump(10.0)
+            }
+            ACTION_SKIP_NEXT -> {
+                handleSkipNext()
             }
             ACTION_UPDATE_STATE -> {
                 updateNotification()
@@ -142,6 +198,16 @@ class CastPlaybackService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+
+        progressJob?.cancel()
+        progressJob = serviceScope.launch {
+            while (isActive) {
+                delay(2000)
+                if (CastSessionManager.isMediaPlaying) {
+                    updateNotification()
+                }
+            }
+        }
     }
 
     private fun updateNotification() {
@@ -156,6 +222,41 @@ class CastPlaybackService : Service() {
             } else {
                 CastSessionManager.resume()
             }
+            updateNotification()
+        }
+    }
+
+    private fun handleResume() {
+        serviceScope.launch(Dispatchers.IO) {
+            CastSessionManager.resume()
+            updateNotification()
+        }
+    }
+
+    private fun handlePause() {
+        serviceScope.launch(Dispatchers.IO) {
+            CastSessionManager.pause()
+            updateNotification()
+        }
+    }
+
+    private fun handleSeek(seconds: Double) {
+        serviceScope.launch(Dispatchers.IO) {
+            CastSessionManager.seek(seconds)
+            updateNotification()
+        }
+    }
+
+    private fun handleJump(deltaSeconds: Double) {
+        serviceScope.launch(Dispatchers.IO) {
+            CastSessionManager.jump(deltaSeconds)
+            updateNotification()
+        }
+    }
+
+    private fun handleSkipNext() {
+        serviceScope.launch(Dispatchers.IO) {
+            CastSessionManager.playNext()
             updateNotification()
         }
     }
@@ -179,45 +280,127 @@ class CastPlaybackService : Service() {
         )
 
         val isPlaying = CastSessionManager.isMediaPlaying
-        val toggleActionIntent = Intent(this, CastPlaybackService::class.java).apply {
-            action = ACTION_TOGGLE_PLAY_PAUSE
-        }
-        val togglePendingIntent = PendingIntent.getService(
+        val posMs = (CastSessionManager.playbackPositionSeconds * 1000).toLong()
+        val durMs = (CastSessionManager.mediaDurationSeconds * 1000).toLong()
+
+        // Periodically record resume timestamp
+        PlaybackResumeManager.savePosition(
             this,
-            1,
-            toggleActionIntent,
+            CastSessionManager.activeMediaUrl,
+            CastSessionManager.playbackPositionSeconds,
+            CastSessionManager.mediaDurationSeconds
+        )
+
+        // 1. Sync native MediaSession state & metadata
+        val state = if (isPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+        val playbackState = PlaybackState.Builder()
+            .setState(state, posMs, 1.0f)
+            .setActions(
+                PlaybackState.ACTION_PLAY or
+                PlaybackState.ACTION_PAUSE or
+                PlaybackState.ACTION_PLAY_PAUSE or
+                PlaybackState.ACTION_STOP or
+                PlaybackState.ACTION_SEEK_TO or
+                PlaybackState.ACTION_FAST_FORWARD or
+                PlaybackState.ACTION_REWIND or
+                (if (CastSessionManager.mediaQueue.isNotEmpty()) PlaybackState.ACTION_SKIP_TO_NEXT else 0L)
+            )
+            .build()
+        mediaSession?.setPlaybackState(playbackState)
+
+        val metadata = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, currentTitle)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, "CastBrowse • $currentDeviceName")
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, maxOf(0L, durMs))
+            .build()
+        mediaSession?.setMetadata(metadata)
+
+        // 2. PendingIntents for notification action buttons
+        val rwPending = PendingIntent.getService(
+            this, 10,
+            Intent(this, CastPlaybackService::class.java).apply { action = ACTION_REWIND },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val playPausePending = PendingIntent.getService(
+            this, 11,
+            Intent(this, CastPlaybackService::class.java).apply { action = ACTION_TOGGLE_PLAY_PAUSE },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val ffPending = PendingIntent.getService(
+            this, 12,
+            Intent(this, CastPlaybackService::class.java).apply { action = ACTION_FAST_FORWARD },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val nextPending = PendingIntent.getService(
+            this, 13,
+            Intent(this, CastPlaybackService::class.java).apply { action = ACTION_SKIP_NEXT },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val stopPending = PendingIntent.getService(
+            this, 14,
+            Intent(this, CastPlaybackService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val stopActionIntent = Intent(this, CastPlaybackService::class.java).apply {
-            action = ACTION_STOP
-        }
-        val stopPendingIntent = PendingIntent.getService(
-            this,
-            2,
-            stopActionIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val playPauseIcon = if (isPlaying) {
-            android.R.drawable.ic_media_pause
-        } else {
-            android.R.drawable.ic_media_play
-        }
+        val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val playPauseText = if (isPlaying) "Pause" else "Resume"
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(currentTitle)
             .setContentText("Casting to $currentDeviceName • ${if (isPlaying) "Playing" else "Paused"}")
             .setContentIntent(contentPendingIntent)
             .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .addAction(playPauseIcon, playPauseText, togglePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
-            .build()
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+
+        // Attach system MediaStyle
+        val mediaStyle = Notification.MediaStyle()
+        mediaSession?.let {
+            mediaStyle.setMediaSession(it.sessionToken)
+            mediaStyle.setShowActionsInCompactView(0, 1, 2)
+        }
+        builder.style = mediaStyle
+
+        builder.addAction(
+            Notification.Action.Builder(
+                android.R.drawable.ic_media_rew,
+                "-10s",
+                rwPending
+            ).build()
+        )
+        builder.addAction(
+            Notification.Action.Builder(
+                playPauseIcon,
+                playPauseText,
+                playPausePending
+            ).build()
+        )
+        builder.addAction(
+            Notification.Action.Builder(
+                android.R.drawable.ic_media_ff,
+                "+10s",
+                ffPending
+            ).build()
+        )
+        if (CastSessionManager.mediaQueue.isNotEmpty()) {
+            builder.addAction(
+                Notification.Action.Builder(
+                    android.R.drawable.ic_media_next,
+                    "Next",
+                    nextPending
+                ).build()
+            )
+        } else {
+            builder.addAction(
+                Notification.Action.Builder(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Stop",
+                    stopPending
+                ).build()
+            )
+        }
+
+        return builder.build()
     }
 
     private fun acquireWakeAndWifiLocks() {
@@ -228,7 +411,7 @@ class CastPlaybackService : Service() {
                 "CastBrowse:CastPlaybackWakeLock"
             ).apply {
                 setReferenceCounted(false)
-                acquire(12 * 60 * 60 * 1000L) // 12 hours safety timeout
+                acquire(12 * 60 * 60 * 1000L)
             }
             Log.d(TAG, "WakeLock acquired for background casting")
         } catch (e: Exception) {
@@ -276,10 +459,10 @@ class CastPlaybackService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "FCast Media Playback",
+                "Cast Media Playback",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Shows active FCast streaming session controls"
+                description = "Shows active streaming session controls"
                 setShowBadge(false)
                 lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
@@ -290,6 +473,9 @@ class CastPlaybackService : Service() {
 
     override fun onDestroy() {
         serviceScope.cancel()
+        mediaSession?.isActive = false
+        mediaSession?.release()
+        mediaSession = null
         releaseWakeAndWifiLocks()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             stopForeground(STOP_FOREGROUND_REMOVE)

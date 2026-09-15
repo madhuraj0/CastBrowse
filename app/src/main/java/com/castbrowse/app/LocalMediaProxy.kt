@@ -27,6 +27,9 @@ object LocalMediaProxy {
     var proxyPort: Int = DEFAULT_PROXY_PORT
         private set
 
+    @Volatile
+    var activeSubtitleContent: String? = null
+
     private var serverSocket: ServerSocket? = null
     private var job: Job? = null
     
@@ -317,6 +320,20 @@ object LocalMediaProxy {
                         "Content-Length: ${response.length}\r\n" +
                         "Connection: close\r\n" +
                         "Access-Control-Allow-Origin: *\r\n\r\n$response").toByteArray())
+                out.flush()
+                return
+            }
+
+            if (path.startsWith("/subtitles.vtt")) {
+                val vtt = activeSubtitleContent ?: "WEBVTT\n\n"
+                val bytes = vtt.toByteArray(Charsets.UTF_8)
+                val out = socket.getOutputStream()
+                out.write(("HTTP/1.1 200 OK\r\n" +
+                        "Content-Type: text/vtt; charset=utf-8\r\n" +
+                        "Content-Length: ${bytes.size}\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Connection: close\r\n\r\n").toByteArray())
+                out.write(bytes)
                 out.flush()
                 return
             }
@@ -772,6 +789,27 @@ object LocalMediaProxy {
             video.play().catch(() => {});
             showOsd();
           }
+          if (data.aspectRatio) {
+            video.style.objectFit = data.aspectRatio === 'Fill' ? 'fill' : data.aspectRatio === 'Zoom' ? 'cover' : 'contain';
+          }
+          if (typeof data.loop === 'boolean') {
+            video.loop = data.loop;
+          }
+          if (data.subtitleUrl) {
+            let track = video.querySelector('track');
+            if (!track) {
+              track = document.createElement('track');
+              track.kind = 'subtitles';
+              track.default = true;
+              video.appendChild(track);
+            }
+            if (track.src !== data.subtitleUrl) {
+              track.src = data.subtitleUrl;
+            }
+          } else {
+            const track = video.querySelector('track');
+            if (track) track.remove();
+          }
           if (data.command === 'pause') {
             video.pause();
           } else if (data.command === 'resume' || data.command === 'play') {
@@ -791,13 +829,14 @@ object LocalMediaProxy {
 
     try {
       if (video.src && currentUrl) {
+        const pState = video.ended ? 'ended' : video.paused ? 'paused' : 'playing';
         await fetch('/tv/api/progress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             currentTime: video.currentTime || 0,
             duration: video.duration || 0,
-            state: video.paused ? 'paused' : 'playing'
+            state: pState
           })
         });
       }

@@ -4,7 +4,9 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 object CastSessionManager {
@@ -22,6 +24,32 @@ object CastSessionManager {
     var mediaDurationSeconds by mutableStateOf(0.0)
     /** Receiver volume level (0.0 to 1.0) */
     var volume by mutableStateOf(0.5f)
+
+    /** Loop/repeat playback continuously */
+    var isLoopEnabled by mutableStateOf(false)
+
+    /** Video aspect ratio: 16:9, Fill, Zoom, Original */
+    var aspectRatio by mutableStateOf("16:9")
+
+    /** Audio delay in ms (-500ms to +500ms) */
+    var audioDelayMs by mutableStateOf(0)
+
+    /** Subtitle sync offset in ms (-2000ms to +2000ms) */
+    var subtitleOffsetMs by mutableStateOf(0)
+
+    /** Active external subtitle URL and display name */
+    var activeSubtitleUrl by mutableStateOf<String?>(null)
+    var activeSubtitleName by mutableStateOf<String?>(null)
+
+    /** Multi-audio stream options */
+    var audioTracks by mutableStateOf<List<String>>(emptyList())
+    var selectedAudioTrack by mutableStateOf(0)
+
+    /** Continuous playback queue */
+    val mediaQueue = androidx.compose.runtime.mutableStateListOf<ExtractedVideo>()
+
+    var appContext: Context? = null
+    var onSessionStateChanged: (() -> Unit)? = null
 
     fun getRecentIps(context: Context): List<String> {
         val prefs = context.getSharedPreferences("cast_prefs", Context.MODE_PRIVATE)
@@ -162,6 +190,75 @@ object CastSessionManager {
                 CastSessionManager.volume = volume
             }
             CastProtocol.FCAST -> FCastClient.setVolume(device.ipAddress, volume, device.port)
+        }
+    }
+
+    suspend fun jump(deltaSeconds: Double) = withContext(Dispatchers.IO) {
+        val maxDuration = if (mediaDurationSeconds > 0) mediaDurationSeconds else 86400.0
+        val target = (playbackPositionSeconds + deltaSeconds).coerceIn(0.0, maxDuration)
+        seek(target)
+    }
+
+    suspend fun restart() = withContext(Dispatchers.IO) {
+        seek(0.0)
+    }
+
+    fun updateAspectRatio(ratio: String) {
+        aspectRatio = ratio
+        WebReceiverController.updateAspectRatio(ratio)
+    }
+
+    fun setAudioDelay(delayMs: Int) {
+        audioDelayMs = delayMs
+        WebReceiverController.setAudioDelay(delayMs)
+    }
+
+    fun setSubtitleOffset(offsetMs: Int) {
+        subtitleOffsetMs = offsetMs
+        SubtitleManager.updateOffset(offsetMs)
+    }
+
+    fun setLoop(enabled: Boolean) {
+        isLoopEnabled = enabled
+        WebReceiverController.setLoop(enabled)
+    }
+
+    fun addToQueue(video: ExtractedVideo) {
+        if (mediaQueue.none { it.url == video.url }) {
+            mediaQueue.add(video)
+        }
+    }
+
+    fun removeFromQueue(index: Int) {
+        if (index in mediaQueue.indices) {
+            mediaQueue.removeAt(index)
+        }
+    }
+
+    fun clearQueue() {
+        mediaQueue.clear()
+    }
+
+    suspend fun playNext(): Result<Unit> = withContext(Dispatchers.IO) {
+        if (mediaQueue.isEmpty()) return@withContext Result.failure(Exception("Queue is empty"))
+        val next = mediaQueue.removeAt(0)
+        val dev = castingDevice ?: return@withContext Result.failure(Exception("No active cast device"))
+        play(dev, next.url, next.title.ifEmpty { "Media Stream" })
+    }
+
+    fun onPlaybackFinished() {
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            val ctx = appContext
+            if (ctx != null && activeMediaUrl != null) {
+                PlaybackResumeManager.clearPosition(ctx, activeMediaUrl)
+            }
+            if (isLoopEnabled) {
+                restart()
+            } else if (mediaQueue.isNotEmpty()) {
+                playNext()
+            } else {
+                stop()
+            }
         }
     }
 }
