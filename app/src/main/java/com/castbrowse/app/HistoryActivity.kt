@@ -125,6 +125,7 @@ fun HistoryScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             Box(
                 modifier = Modifier
@@ -225,7 +226,6 @@ fun HistoryScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
         ) {
             if (filteredItems.isEmpty()) {
                 Box(

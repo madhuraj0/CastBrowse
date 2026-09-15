@@ -224,6 +224,7 @@ class CastControlActivity : ComponentActivity() {
         }
 
         Scaffold(
+            containerColor = Color.Transparent,
             topBar = {
                 TopAppBar(
                     title = {

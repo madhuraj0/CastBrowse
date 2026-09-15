@@ -2,11 +2,7 @@ package com.castbrowse.app
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +19,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
@@ -70,8 +67,33 @@ import androidx.compose.ui.unit.LayoutDirection
 object GlassmorphicTheme {
 
     /**
+     * Pure optical translucent liquid glass color according to LiquidGL principles.
+     * Uniform attenuation without painted gradients, allowing content behind to be genuinely visible.
+     */
+    fun liquidGlassColor(
+        isDark: Boolean = true,
+        isAmoled: Boolean = false,
+        alphaMultiplier: Float = 1.0f
+    ): Color {
+        return when {
+            isAmoled -> Color(0xFF07080E).copy(alpha = (0.36f * alphaMultiplier).coerceIn(0f, 1f))
+            isDark -> Color(0xFF101422).copy(alpha = (0.32f * alphaMultiplier).coerceIn(0f, 1f))
+            else -> Color(0xFFFFFFFF).copy(alpha = (0.36f * alphaMultiplier).coerceIn(0f, 1f))
+        }
+    }
+
+    /**
+     * Get acrylic translucent surface background color (delegates to liquid optical tint)
+     */
+    fun glassColor(
+        isDark: Boolean = true,
+        isAmoled: Boolean = false,
+        alphaMultiplier: Float = 1.0f
+    ): Color = liquidGlassColor(isDark, isAmoled, alphaMultiplier)
+
+    /**
      * Generate specular rim gradient border for acrylic glass effect.
-     * Light reflects off top-left and fades toward bottom-right.
+     * Pure optical Fresnel reflection catching edge light without painted chromatic color.
      */
     fun specularBorder(
         isDark: Boolean = true,
@@ -79,8 +101,8 @@ object GlassmorphicTheme {
         width: Dp = 1.dp
     ): BorderStroke {
         val topHighlight = when {
-            isAmoled -> Color.White.copy(alpha = 0.25f)
-            isDark -> Color.White.copy(alpha = 0.28f)
+            isAmoled -> Color.White.copy(alpha = 0.22f)
+            isDark -> Color.White.copy(alpha = 0.26f)
             else -> Color.White.copy(alpha = 0.65f)
         }
         val bottomShadow = when {
@@ -90,61 +112,26 @@ object GlassmorphicTheme {
         }
         return BorderStroke(
             width = width,
-            brush = Brush.linearGradient(
+            brush = Brush.verticalGradient(
                 colors = listOf(topHighlight, bottomShadow)
             )
         )
     }
 
     /**
-     * Get acrylic translucent surface background color
-     */
-    fun glassColor(
-        isDark: Boolean = true,
-        isAmoled: Boolean = false,
-        alphaMultiplier: Float = 1.0f
-    ): Color {
-        return when {
-            isAmoled -> Color(0xFF08080C).copy(alpha = 0.88f * alphaMultiplier)
-            isDark -> Color(0xFF161822).copy(alpha = 0.82f * alphaMultiplier)
-            else -> Color(0xFFFCFCFD).copy(alpha = 0.85f * alphaMultiplier)
-        }
-    }
-
-    /**
-     * Card background with subtle ambient vertical gradient for depth
+     * Card background with subtle ambient vertical gradient for depth (LiquidGL clean tint)
      */
     fun cardGlassGradient(
         isDark: Boolean = true,
         isAmoled: Boolean = false
     ): Brush {
-        return if (isAmoled) {
-            Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFF14141E).copy(alpha = 0.75f),
-                    Color(0xFF08080C).copy(alpha = 0.85f)
-                )
-            )
-        } else if (isDark) {
-            Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFF232738).copy(alpha = 0.70f),
-                    Color(0xFF141622).copy(alpha = 0.80f)
-                )
-            )
-        } else {
-            Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFFFFFFFF).copy(alpha = 0.90f),
-                    Color(0xFFF1F3F9).copy(alpha = 0.80f)
-                )
-            )
-        }
+        val base = liquidGlassColor(isDark, isAmoled)
+        return Brush.verticalGradient(listOf(base, base))
     }
+
     /**
-     * Refractive specular rim gradient border simulating liquid glass refraction.
-     * High specular reflection at top-left edge, subtle chromatic dispersion along the curve,
-     * and caustic depth towards bottom-right.
+     * Refractive specular rim border simulating liquid glass refraction.
+     * Delicate specular reflection at top-left edge fading to subtle caustic depth.
      */
     fun refractiveBorder(
         isDark: Boolean = true,
@@ -152,81 +139,42 @@ object GlassmorphicTheme {
         width: Dp = 1.dp
     ): BorderStroke {
         val topHighlight = when {
-            isAmoled -> Color.White.copy(alpha = 0.38f)
-            isDark -> Color.White.copy(alpha = 0.42f)
-            else -> Color.White.copy(alpha = 0.85f)
-        }
-        val midCaustic = when {
-            isAmoled -> Color(0xFF6366F1).copy(alpha = 0.18f)
-            isDark -> Color(0xFF818CF8).copy(alpha = 0.22f)
-            else -> Color(0xFF6366F1).copy(alpha = 0.15f)
+            isAmoled -> Color.White.copy(alpha = 0.28f)
+            isDark -> Color.White.copy(alpha = 0.32f)
+            else -> Color.White.copy(alpha = 0.70f)
         }
         val bottomShadow = when {
             isAmoled -> Color.White.copy(alpha = 0.05f)
-            isDark -> Color.White.copy(alpha = 0.08f)
-            else -> Color.Black.copy(alpha = 0.08f)
+            isDark -> Color.White.copy(alpha = 0.07f)
+            else -> Color.Black.copy(alpha = 0.07f)
         }
         return BorderStroke(
             width = width,
-            brush = Brush.linearGradient(
-                colors = listOf(topHighlight, midCaustic, bottomShadow),
-                start = Offset.Zero,
-                end = Offset.Infinite
+            brush = Brush.verticalGradient(
+                colors = listOf(topHighlight, bottomShadow)
             )
         )
     }
 
     /**
-     * Translucent liquid glass gradient with caustics and highlights.
+     * Refractive liquid glass brush (LiquidGL uniform translucent optical tint)
      */
     fun refractiveGlassBrush(
         isDark: Boolean = true,
         isAmoled: Boolean = false
     ): Brush {
-        return if (isAmoled) {
-            Brush.linearGradient(
-                colors = listOf(
-                    Color(0xFF161822).copy(alpha = 0.85f),
-                    Color(0xFF0C0D14).copy(alpha = 0.90f),
-                    Color(0xFF131520).copy(alpha = 0.82f),
-                    Color(0xFF07080C).copy(alpha = 0.94f)
-                ),
-                start = Offset.Zero,
-                end = Offset.Infinite
-            )
-        } else if (isDark) {
-            Brush.linearGradient(
-                colors = listOf(
-                    Color(0xFF282D42).copy(alpha = 0.78f),
-                    Color(0xFF1B1E2E).copy(alpha = 0.85f),
-                    Color(0xFF22263A).copy(alpha = 0.75f),
-                    Color(0xFF141624).copy(alpha = 0.90f)
-                ),
-                start = Offset.Zero,
-                end = Offset.Infinite
-            )
-        } else {
-            Brush.linearGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.92f),
-                    Color(0xFFF1F5FB).copy(alpha = 0.84f),
-                    Color.White.copy(alpha = 0.88f),
-                    Color(0xFFE5ECF6).copy(alpha = 0.86f)
-                ),
-                start = Offset.Zero,
-                end = Offset.Infinite
-            )
-        }
+        val base = liquidGlassColor(isDark, isAmoled)
+        return Brush.verticalGradient(listOf(base, base))
     }
 }
 
 /**
  * Custom Compose Shape representing a dual-segment chocolate bar.
- * Features rounded corners and smooth inward waist notches on the left and right sides
- * where the two rows are joined as one continuous unit.
+ * Features rounded corners and smooth convex curves meeting to a rounded depression
+ * on both left and right sides where the two rows are joined as one continuous unit.
  */
 class ChocolateBarShape(
-    val cornerRadius: Dp = 26.dp,
+    val cornerRadius: Dp = 24.dp,
     val notchDepth: Dp = 6.dp,
     val notchHeight: Dp = 14.dp,
     val waistFraction: Float = 0.50f
@@ -248,17 +196,22 @@ class ChocolateBarShape(
             lineTo(w - r, 0f)
             quadraticBezierTo(w, 0f, w, r)
 
-            val rightNotchTop = (waistY - nh / 2f).coerceAtLeast(r)
-            val rightNotchBottom = (waistY + nh / 2f).coerceAtMost(h - r)
+            // Right waist: convex outer shoulder curves smoothly into the rounded depression at (w - nd, waistY),
+            // then curves convexly back out to rejoin w at waistY + nh.
+            val rightNotchTop = (waistY - nh).coerceAtLeast(r)
+            val rightNotchBottom = (waistY + nh).coerceAtMost(h - r)
             lineTo(w, rightNotchTop)
+
+            // Upper convex curve meeting rounded depression
             cubicTo(
-                w - nd * 0.4f, rightNotchTop,
-                w - nd, waistY - nh * 0.2f,
+                w, waistY - nh * 0.42f,
+                w - nd, waistY - nh * 0.42f,
                 w - nd, waistY
             )
+            // Rounded depression meeting lower convex curve
             cubicTo(
-                w - nd, waistY + nh * 0.2f,
-                w - nd * 0.4f, rightNotchBottom,
+                w - nd, waistY + nh * 0.42f,
+                w, waistY + nh * 0.42f,
                 w, rightNotchBottom
             )
 
@@ -267,17 +220,21 @@ class ChocolateBarShape(
             lineTo(r, h)
             quadraticBezierTo(0f, h, 0f, h - r)
 
-            val leftNotchBottom = (waistY + nh / 2f).coerceAtMost(h - r)
-            val leftNotchTop = (waistY - nh / 2f).coerceAtLeast(r)
+            // Left waist: symmetrical convex curve meeting rounded depression
+            val leftNotchBottom = (waistY + nh).coerceAtMost(h - r)
+            val leftNotchTop = (waistY - nh).coerceAtLeast(r)
             lineTo(0f, leftNotchBottom)
+
+            // Lower convex curve meeting rounded depression
             cubicTo(
-                nd * 0.4f, leftNotchBottom,
-                nd, waistY + nh * 0.2f,
+                0f, waistY + nh * 0.42f,
+                nd, waistY + nh * 0.42f,
                 nd, waistY
             )
+            // Rounded depression meeting upper convex curve
             cubicTo(
-                nd, waistY - nh * 0.2f,
-                nd * 0.4f, leftNotchTop,
+                nd, waistY - nh * 0.42f,
+                0f, waistY - nh * 0.42f,
                 0f, leftNotchTop
             )
 
@@ -300,12 +257,12 @@ fun Modifier.glassmorphic(
     elevation: Dp = 8.dp
 ): Modifier = this
     .shadow(elevation = elevation, shape = shape, clip = false)
-    .border(
-        border = GlassmorphicTheme.specularBorder(isDark, isAmoled, borderWidth),
+    .background(
+        color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
         shape = shape
     )
-    .background(
-        brush = GlassmorphicTheme.cardGlassGradient(isDark, isAmoled),
+    .border(
+        border = GlassmorphicTheme.specularBorder(isDark, isAmoled, borderWidth),
         shape = shape
     )
     .clip(shape)
@@ -313,6 +270,7 @@ fun Modifier.glassmorphic(
 /**
  * Modifier extension: Apply refractive liquid glass surface with specular rim,
  * caustic glow shadow, and translucent refractive backdrop.
+ * Follows LiquidGL: uniform optical attenuation, no painted gradients.
  */
 fun Modifier.refractiveGlass(
     shape: Shape = RoundedCornerShape(20.dp),
@@ -326,11 +284,11 @@ fun Modifier.refractiveGlass(
         elevation = elevation,
         shape = shape,
         clip = false,
-        ambientColor = if (isDark) Color.Black.copy(alpha = 0.50f) else Color.Black.copy(alpha = 0.12f),
-        spotColor = glowColor ?: (if (isDark) Color(0xFF6366F1).copy(alpha = 0.28f) else Color(0xFF6366F1).copy(alpha = 0.15f))
+        ambientColor = if (isDark) Color.Black.copy(alpha = 0.35f) else Color.Black.copy(alpha = 0.08f),
+        spotColor = glowColor ?: (if (isDark) Color(0xFF6366F1).copy(alpha = 0.15f) else Color(0xFF6366F1).copy(alpha = 0.08f))
     )
     .background(
-        brush = GlassmorphicTheme.refractiveGlassBrush(isDark, isAmoled),
+        color = GlassmorphicTheme.liquidGlassColor(isDark, isAmoled),
         shape = shape
     )
     .border(
@@ -340,18 +298,18 @@ fun Modifier.refractiveGlass(
     .clip(shape)
 
 /**
- * Tactile spring micro-interaction: subtle scale-down on press with bouncy spring release
+ * Tactile fluid micro-interaction: subtle scale-down on press with seamless fluid easing release (no bounce)
  */
 fun Modifier.tactilePress(
-    pressedScale: Float = 0.95f,
+    pressedScale: Float = 0.96f,
     onClick: (() -> Unit)? = null
 ): Modifier = composed {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (isPressed) pressedScale else 1.0f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
+        animationSpec = tween(
+            durationMillis = 180,
+            easing = CubicBezierEasing(0.2f, 0.0f, 0.2f, 1.0f)
         ),
         label = "tactileScale"
     )
@@ -371,6 +329,27 @@ fun Modifier.tactilePress(
                 }
             }
         }
+}
+
+/**
+ * Modifier extension: Apply organic breathing alpha pulsation for liquid glass highlights
+ */
+fun Modifier.liquidBreathing(
+    minAlpha: Float = 0.82f,
+    maxAlpha: Float = 1.0f,
+    durationMillis: Int = 2400
+): Modifier = composed {
+    val infiniteTransition = rememberInfiniteTransition(label = "liquidBreathing")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = minAlpha,
+        targetValue = maxAlpha,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = durationMillis, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "liquidBreathAlpha"
+    )
+    this.graphicsLayer { this.alpha = alpha }
 }
 
 /**
@@ -510,15 +489,15 @@ fun ChocolateBottomBar(
                 topRowContent()
             }
 
-            // Chocolate Bar Waist Snap Groove (Etched specular horizontal divider)
-            val grooveShadow = if (isDark) Color.Black.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.12f)
-            val grooveHighlight = if (isDark) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.65f)
+            // Chocolate Bar Waist Snap Groove (Refractive etched specular horizontal divider)
+            val grooveShadow = if (isDark) Color.Black.copy(alpha = 0.28f) else Color.Black.copy(alpha = 0.08f)
+            val grooveHighlight = if (isDark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.40f)
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.dp)
             ) {
-                val nd = 5.dp.toPx()
+                val nd = 6.dp.toPx()
                 drawLine(
                     color = grooveShadow,
                     start = Offset(nd, 0f),
@@ -543,14 +522,26 @@ fun ChocolateBottomBar(
                 val tabWidth = maxWidth / 2
                 val indicatorOffset by animateDpAsState(
                     targetValue = if (currentNavTab == 0) 0.dp else tabWidth,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMediumLow
+                    animationSpec = tween(
+                        durationMillis = 280,
+                        easing = CubicBezierEasing(0.25f, 1f, 0.35f, 1f)
                     ),
                     label = "chocolateBottomBarIndicator"
                 )
 
-                // Liquid sliding selection pill indicator
+                // Organic breathing optical pulse
+                val infiniteTransition = rememberInfiniteTransition(label = "indicatorBreath")
+                val breathAlpha by infiniteTransition.animateFloat(
+                    initialValue = if (isDark) 0.16f else 0.12f,
+                    targetValue = if (isDark) 0.26f else 0.18f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 2200, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "indicatorBreathAlpha"
+                )
+
+                // Liquid sliding selection pill indicator - uniform liquid tint, no gradient (LiquidGL)
                 Box(
                     modifier = Modifier
                         .offset(x = indicatorOffset)
@@ -559,16 +550,12 @@ fun ChocolateBottomBar(
                         .padding(horizontal = 4.dp, vertical = 2.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(
-                            brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.32f else 0.20f),
-                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.18f else 0.10f)
-                                )
-                            )
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = breathAlpha),
+                            shape = RoundedCornerShape(20.dp)
                         )
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = (breathAlpha * 1.6f).coerceAtMost(0.55f)),
                             shape = RoundedCornerShape(20.dp)
                         )
                 )
@@ -698,14 +685,26 @@ fun FloatingGlassmorphicBottomBar(
                 val tabWidth = maxWidth / 2
                 val indicatorOffset by animateDpAsState(
                     targetValue = if (currentNavTab == 0) 0.dp else tabWidth,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessMediumLow
+                    animationSpec = tween(
+                        durationMillis = 280,
+                        easing = CubicBezierEasing(0.25f, 1f, 0.35f, 1f)
                     ),
                     label = "bottomBarIndicator"
                 )
 
-                // Liquid sliding selection pill indicator
+                // Organic breathing optical pulse
+                val infiniteTransition = rememberInfiniteTransition(label = "singleBarBreath")
+                val breathAlpha by infiniteTransition.animateFloat(
+                    initialValue = if (isDark) 0.16f else 0.12f,
+                    targetValue = if (isDark) 0.26f else 0.18f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 2200, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "singleBarBreathAlpha"
+                )
+
+                // Liquid sliding selection pill indicator - uniform liquid tint, no gradient (LiquidGL)
                 Box(
                     modifier = Modifier
                         .offset(x = indicatorOffset)
@@ -714,16 +713,12 @@ fun FloatingGlassmorphicBottomBar(
                         .padding(2.dp)
                         .clip(RoundedCornerShape(22.dp))
                         .background(
-                            brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.32f else 0.20f),
-                                    MaterialTheme.colorScheme.primary.copy(alpha = if (isDark) 0.18f else 0.10f)
-                                )
-                            )
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = breathAlpha),
+                            shape = RoundedCornerShape(22.dp)
                         )
                         .border(
                             width = 1.dp,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = (breathAlpha * 1.6f).coerceAtMost(0.55f)),
                             shape = RoundedCornerShape(22.dp)
                         )
                 )
@@ -834,7 +829,6 @@ fun SpeedDialHomeScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
     ) {
         Column(
             modifier = Modifier

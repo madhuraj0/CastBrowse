@@ -62,6 +62,7 @@ fun DownloadsScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             Box(
                 modifier = Modifier
@@ -100,7 +101,6 @@ fun DownloadsScreen(onBack: () -> Unit) {
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
         ) {
             if (downloadsList.isEmpty()) {
                 Box(

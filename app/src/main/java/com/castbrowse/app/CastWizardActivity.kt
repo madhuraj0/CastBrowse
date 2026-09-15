@@ -259,6 +259,7 @@ class CastWizardActivity : ComponentActivity() {
         val hotspotIp = remember { NetworkDiagnostics.getHotspotIp() }
 
         Scaffold(
+            containerColor = Color.Transparent,
             topBar = {
                 TopAppBar(
                     title = { Text("Receiver Setup Wizard", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)) },

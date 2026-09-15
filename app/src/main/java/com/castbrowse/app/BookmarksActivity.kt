@@ -83,6 +83,7 @@ fun BookmarksScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             Box(
                 modifier = Modifier
@@ -185,7 +186,6 @@ fun BookmarksScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .background(MaterialTheme.colorScheme.background)
         ) {
             if (filteredBookmarks.isEmpty()) {
                 Box(

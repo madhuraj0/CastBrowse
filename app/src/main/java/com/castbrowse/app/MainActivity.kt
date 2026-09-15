@@ -20,6 +20,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -1834,6 +1838,7 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
+            containerColor = Color.Transparent,
             topBar = {
                 if (currentNavTab == 0) {
                     if (!isBottomAddressBar) {
@@ -1934,11 +1939,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         ) { paddingValues ->
+            val density = LocalDensity.current
+            val bottomNavPaddingPx = with(density) { paddingValues.calculateBottomPadding().roundToPx() }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
-                    .background(MaterialTheme.colorScheme.background)
+                    .padding(top = paddingValues.calculateTopPadding())
             ) {
                 Box(
                     modifier = Modifier
@@ -1952,6 +1958,8 @@ class MainActivity : ComponentActivity() {
                     factory = { ctx ->
                         val wv = SecureWebView(ctx).apply {
                             webView = this
+                            clipToPadding = false
+                            setPadding(0, 0, 0, bottomNavPaddingPx)
                             webViewClient = MediaExtractorClient(
                                 isAdBlockEnabled = { isAdBlockEnabled },
                                 isDesktopMode = { isDesktopMode || currentUaMode == UserAgentManager.MODE_DESKTOP },
@@ -2107,6 +2115,11 @@ class MainActivity : ComponentActivity() {
                         swipeRefresh.isRefreshing = isLoading
                         val view = webView ?: return@AndroidView
 
+                        if (view.paddingBottom != bottomNavPaddingPx) {
+                            view.clipToPadding = false
+                            view.setPadding(0, 0, 0, bottomNavPaddingPx)
+                        }
+
                         if (defaultUserAgent == null) {
                             defaultUserAgent = view.settings.userAgentString
                         }
@@ -2181,28 +2194,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Dedicated Media Hub Page with Fluid Physics Spring Transition
+            // Dedicated Media Hub Page with Seamless Dissolving Fade Transition
             AnimatedVisibility(
                 visible = currentNavTab == 1,
-                enter = slideInVertically(
-                    initialOffsetY = { it / 6 },
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessMediumLow
-                    )
-                ) + fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
-                exit = slideOutVertically(
-                    targetOffsetY = { it / 6 },
-                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                ) + fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                enter = fadeIn(animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)),
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(2f)
             ) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
+                    modifier = Modifier.fillMaxSize()
                 ) {
                     MediaHubPage(
                         extractedVideos = extractedVideos,
@@ -2280,6 +2282,7 @@ class MainActivity : ComponentActivity() {
                                 CastSessionManager.currentPhotoIndex = (CastSessionManager.photoSlideshowList.size - 1).coerceAtLeast(0)
                             }
                         },
+                        bottomPadding = paddingValues.calculateBottomPadding(),
                         onSwitchToBrowser = { currentNavTab = 0 }
                     )
                 }
@@ -3220,6 +3223,7 @@ private fun MediaHubPage(
     onDismissVideo: (DeviceVideoItem) -> Unit = {},
     onDismissAudio: (DeviceAudioItem) -> Unit = {},
     onDismissPhoto: (DevicePhotoItem) -> Unit = {},
+    bottomPadding: Dp = 0.dp,
     onSwitchToBrowser: () -> Unit
 ) {
     val context = LocalContext.current
@@ -3242,12 +3246,12 @@ private fun MediaHubPage(
     Column(modifier = Modifier.fillMaxSize()) {
         // Media Hub Top Tabs: Web Streams | Device Videos | Audio & Music | Photos & Slideshow
         Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 1.dp
+            color = Color.Transparent,
+            tonalElevation = 0.dp
         ) {
             ScrollableTabRow(
                 selectedTabIndex = subTab,
-                containerColor = MaterialTheme.colorScheme.surface,
+                containerColor = Color.Transparent,
                 contentColor = MaterialTheme.colorScheme.primary,
                 edgePadding = 12.dp,
                 divider = {
@@ -3423,7 +3427,7 @@ private fun MediaHubPage(
 
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp + bottomPadding),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         items(extractedVideos, key = { it.url }) { video ->
@@ -3440,7 +3444,7 @@ private fun MediaHubPage(
                 // DEVICE VIDEOS
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + bottomPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
@@ -3541,7 +3545,7 @@ private fun MediaHubPage(
                 // MUSIC & AUDIO (OFFLINE AUDIO MODE + OLED BLACK SCREEN ON TV)
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + bottomPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
@@ -3911,7 +3915,7 @@ private fun MediaHubPage(
                             modifier = Modifier.fillMaxSize(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(bottom = 16.dp)
+                            contentPadding = PaddingValues(bottom = 16.dp + bottomPadding)
                         ) {
                             items(photoSlideshowList.size, key = { idx -> photoSlideshowList[idx].uri.toString() }) { idx ->
                                 val photo = photoSlideshowList[idx]
