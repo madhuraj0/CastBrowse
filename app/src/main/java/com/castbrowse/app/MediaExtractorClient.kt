@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.util.Base64
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -30,13 +31,16 @@ data class ExtractedVideo(
     val title: String = "",
     val poster: String = "",
     val resolution: String = "",
-    val size: String = ""
+    val size: String = "",
+    val isDrmProtected: Boolean = false,
+    val drmKeySystem: String? = null
 )
 
 class MediaExtractorClient(
     private val isAdBlockEnabled: () -> Boolean,
     private val isDesktopMode: () -> Boolean,
     private val onPageStarted: (String) -> Unit,
+    private val onDrmDetected: ((keySystem: String, url: String) -> Unit)? = null,
     private val onMediaDiscovered: (ExtractedVideo) -> Unit
 ) : WebViewClient() {
 
@@ -96,7 +100,6 @@ class MediaExtractorClient(
         }
 
         fun updateAdHosts(context: Context, onResult: (Boolean, Int) -> Unit) {
-            // Connectivity check before attempting network request
             if (!isNetworkAvailable(context)) {
                 scope.launch {
                     withContext(Dispatchers.Main) { onResult(false, 0) }
@@ -122,11 +125,9 @@ class MediaExtractorClient(
                             return@launch
                         }
 
-                        // Persist the downloaded file locally
                         val localFile = File(context.filesDir, "hosts.txt")
                         localFile.writeText(bodyString)
 
-                        // Re-parse from the new content
                         adHostsSet.clear()
                         parseHostsString(bodyString)
                         isLoaded = true
@@ -201,6 +202,11 @@ class MediaExtractorClient(
             }
         }
 
+        /**
+         * Deep iFrame, Shadow DOM, and DRM EME detection JavaScript scraper.
+         * Injected into WebView contexts to capture embedded players, nested frames,
+         * and report Widevine/PlayReady DRM-encrypted media streams.
+         */
         internal val DOM_SCRAPER_SCRIPT = """
             (function() {
                 if (window.__castbrowseScraperInitialized) {
@@ -225,23 +231,55 @@ class MediaExtractorClient(
                 var manifestRegex = /(\.m3u8|\.mpd|\/playlist|\/manifest|\/master|\/chunklist)([\?#].*)?$/i;
                 var videoRegex = /\.(mp4|m3u8|m3u|webm|mpd|ogg|mkv)(\?.*)?$/i;
 
-                function reportVideo(src, poster, title, resolution, sizeText) {
+                function reportVideo(src, poster, title, resolution, sizeText, isDrm, drmKeySystem) {
                     if (!src || (!src.startsWith('http://') && !src.startsWith('https://'))) return;
-                    if (segmentRegex.test(src)) return; // Ignore segmented chunks (.m4s, .ts)
+                    if (segmentRegex.test(src)) return;
                     if (reportedUrls.has(src)) return;
                     reportedUrls.add(src);
-                    var cleanTitle = getFilename(src);
+                    var cleanTitle = title || getFilename(src);
                     var payload = [{
                         url: src,
                         poster: poster || "",
                         title: cleanTitle,
                         resolution: resolution || "",
-                        size: sizeText || ""
+                        size: sizeText || "",
+                        isDrmProtected: !!isDrm,
+                        drmKeySystem: drmKeySystem || ""
                     }];
                     if (window.AndroidApp && window.AndroidApp.postMessage) {
                         window.AndroidApp.postMessage(JSON.stringify(payload));
                     }
                 }
+
+                // EME / DRM Interceptor: Catch Widevine / PlayReady / FairPlay encryption requests
+                try {
+                    if (navigator.requestMediaKeySystemAccess) {
+                        var origReqKey = navigator.requestMediaKeySystemAccess;
+                        navigator.requestMediaKeySystemAccess = function(keySystem, configs) {
+                            try {
+                                if (typeof keySystem === 'string') {
+                                    var lower = keySystem.toLowerCase();
+                                    if (lower.indexOf('widevine') !== -1 || lower.indexOf('playready') !== -1 || lower.indexOf('fairplay') !== -1) {
+                                        var detectedName = lower.indexOf('widevine') !== -1 ? 'Widevine' : (lower.indexOf('playready') !== -1 ? 'PlayReady' : 'FairPlay');
+                                        if (window.AndroidApp && window.AndroidApp.postDrmDetected) {
+                                            window.AndroidApp.postDrmDetected(detectedName, window.location.href);
+                                        }
+                                    }
+                                }
+                            } catch(err) {}
+                            return origReqKey.apply(this, arguments);
+                        };
+                    }
+                } catch(e) {}
+
+                document.addEventListener('encrypted', function(e) {
+                    try {
+                        var ks = (e && e.initDataType) ? ('EME (' + e.initDataType + ')') : 'Widevine / EME';
+                        if (window.AndroidApp && window.AndroidApp.postDrmDetected) {
+                            window.AndroidApp.postDrmDetected(ks, (e.target && (e.target.src || e.target.currentSrc)) || window.location.href);
+                        }
+                    } catch(err) {}
+                }, true);
 
                 // Intercept fetch() calls to capture root manifests (.m3u8, .mpd) from MSE/DASH players
                 try {
@@ -270,21 +308,37 @@ class MediaExtractorClient(
                     };
                 } catch(e) {}
 
-                // Dynamic playback interception: Hook HTMLMediaElement prototype
-                try {
-                    var origSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
-                    if (origSrcDesc && origSrcDesc.set) {
-                        var origSet = origSrcDesc.set;
-                        Object.defineProperty(HTMLMediaElement.prototype, 'src', {
-                            set: function(val) {
-                                if (val && typeof val === 'string' && !segmentRegex.test(val)) {
-                                    reportVideo(val, this.poster || "", "", "", "");
-                                }
-                                return origSet.call(this, val);
+                // PostMessage Listener: Extract stream URLs communicated across iframes and players
+                window.addEventListener('message', function(event) {
+                    try {
+                        var data = event.data;
+                        if (typeof data === 'string') {
+                            if ((manifestRegex.test(data) || videoRegex.test(data)) && !segmentRegex.test(data)) {
+                                reportVideo(data, "", "", "", "");
                             }
-                        });
+                            try { data = JSON.parse(data); } catch(e) {}
+                        }
+                        if (typeof data === 'object' && data !== null) {
+                            parseObjectForStreams(data, 0);
+                        }
+                    } catch(e) {}
+                }, true);
+
+                function parseObjectForStreams(obj, depth) {
+                    if (!obj || depth > 4) return;
+                    for (var key in obj) {
+                        try {
+                            var val = obj[key];
+                            if (typeof val === 'string') {
+                                if ((manifestRegex.test(val) || videoRegex.test(val)) && !segmentRegex.test(val)) {
+                                    reportVideo(val, "", "", "", "");
+                                }
+                            } else if (typeof val === 'object' && val !== null) {
+                                parseObjectForStreams(val, depth + 1);
+                            }
+                        } catch(e) {}
                     }
-                } catch(e) {}
+                }
 
                 function checkVideoElement(v) {
                     if (!v) return;
@@ -299,7 +353,7 @@ class MediaExtractorClient(
                     if (src) {
                         reportVideo(src, poster, "", resolution, sizeText);
                     }
-                    var sources = v.getElementsByTagName('source');
+                    var sources = v.getElementsByTagName ? v.getElementsByTagName('source') : [];
                     for (var j = 0; j < sources.length; j++) {
                         if (sources[j].src) {
                             reportVideo(sources[j].src, poster, "", resolution, sizeText);
@@ -307,25 +361,79 @@ class MediaExtractorClient(
                     }
                 }
 
-                function scanDocument() {
-                    var videoTags = document.getElementsByTagName('video');
-                    for (var i = 0; i < videoTags.length; i++) {
-                        checkVideoElement(videoTags[i]);
-                    }
+                // Deep Shadow DOM and iFrame recursive scanner
+                function deepTraverseElements(root, depth) {
+                    if (!root || depth > 6) return;
 
-                    var aTags = document.getElementsByTagName('a');
-                    for (var k = 0; k < aTags.length; k++) {
-                        var href = aTags[k].href;
-                        if (href && videoRegex.test(href)) {
-                            reportVideo(href, "", "", "", "");
+                    // 1. Direct videos
+                    if (root.getElementsByTagName) {
+                        var videoTags = root.getElementsByTagName('video');
+                        for (var i = 0; i < videoTags.length; i++) {
+                            checkVideoElement(videoTags[i]);
                         }
                     }
 
-                    var iframes = document.getElementsByTagName('iframe');
-                    for (var m = 0; m < iframes.length; m++) {
-                        var isrc = iframes[m].src;
-                        if (isrc && videoRegex.test(isrc)) {
-                            reportVideo(isrc, "", "", "", "");
+                    // 2. Direct iframes & embed parameters
+                    if (root.getElementsByTagName) {
+                        var iframes = root.getElementsByTagName('iframe');
+                        for (var m = 0; m < iframes.length; m++) {
+                            var ifr = iframes[m];
+                            var isrc = ifr.src;
+                            if (isrc) {
+                                if (videoRegex.test(isrc) || manifestRegex.test(isrc)) {
+                                    reportVideo(isrc, "", "", "", "");
+                                }
+                                checkUrlParametersForStreams(isrc);
+                            }
+                            // Attempt recursive same-origin child iframe scan
+                            try {
+                                var childDoc = ifr.contentDocument || (ifr.contentWindow && ifr.contentWindow.document);
+                                if (childDoc && childDoc !== root) {
+                                    deepTraverseElements(childDoc, depth + 1);
+                                }
+                            } catch(e) {}
+                        }
+                    }
+
+                    // 3. Shadow DOM traversal
+                    if (root.querySelectorAll) {
+                        var allEls = root.querySelectorAll('*');
+                        for (var k = 0; k < allEls.length; k++) {
+                            var el = allEls[k];
+                            if (el.shadowRoot) {
+                                deepTraverseElements(el.shadowRoot, depth + 1);
+                            }
+                        }
+                    }
+                }
+
+                function checkUrlParametersForStreams(urlStr) {
+                    try {
+                        var questionIdx = urlStr.indexOf('?');
+                        if (questionIdx === -1) return;
+                        var qs = urlStr.substring(questionIdx + 1);
+                        var pairs = qs.split('&');
+                        for (var i = 0; i < pairs.length; i++) {
+                            var p = pairs[i].split('=');
+                            if (p.length === 2) {
+                                var val = decodeURIComponent(p[1]);
+                                if ((videoRegex.test(val) || manifestRegex.test(val)) && !segmentRegex.test(val)) {
+                                    reportVideo(val, "", "", "", "");
+                                }
+                            }
+                        }
+                    } catch(e) {}
+                }
+
+                function scanDocument() {
+                    deepTraverseElements(document, 0);
+
+                    // Scan links that directly link to media files
+                    var aTags = document.getElementsByTagName('a');
+                    for (var k = 0; k < aTags.length; k++) {
+                        var href = aTags[k].href;
+                        if (href && (videoRegex.test(href) || manifestRegex.test(href))) {
+                            reportVideo(href, "", "", "", "");
                         }
                     }
                 }
@@ -333,7 +441,7 @@ class MediaExtractorClient(
                 window.__castbrowseScan = scanDocument;
                 scanDocument();
 
-                // Hook HTMLMediaElement.prototype.play and src setter to catch dynamically attached players
+                // Dynamic playback interception: Hook HTMLMediaElement prototype
                 try {
                     var origPlay = HTMLMediaElement.prototype.play;
                     HTMLMediaElement.prototype.play = function() {
@@ -352,12 +460,37 @@ class MediaExtractorClient(
                     }
                 } catch(e) {}
 
-                // Listen to playback and media events
+                // Hook Element.prototype.attachShadow for web components
+                try {
+                    var origAttachShadow = Element.prototype.attachShadow;
+                    if (origAttachShadow) {
+                        Element.prototype.attachShadow = function() {
+                            var sRoot = origAttachShadow.apply(this, arguments);
+                            try {
+                                var shadowObserver = new MutationObserver(function(muts) {
+                                    for (var i = 0; i < muts.length; i++) {
+                                        for (var j = 0; j < muts[i].addedNodes.length; j++) {
+                                            var n = muts[i].addedNodes[j];
+                                            if (n && n.nodeType === 1) {
+                                                if (n.tagName === 'VIDEO') checkVideoElement(n);
+                                                else deepTraverseElements(n, 0);
+                                            }
+                                        }
+                                    }
+                                });
+                                shadowObserver.observe(sRoot, { childList: true, subtree: true });
+                            } catch(e) {}
+                            return sRoot;
+                        };
+                    }
+                } catch(e) {}
+
+                // Media event listeners
                 document.addEventListener('play', function(e) { checkVideoElement(e.target); }, true);
                 document.addEventListener('loadeddata', function(e) { checkVideoElement(e.target); }, true);
                 document.addEventListener('canplay', function(e) { checkVideoElement(e.target); }, true);
 
-                // MutationObserver for dynamically added videos or iframes
+                // MutationObserver for DOM changes
                 try {
                     var observer = new MutationObserver(function(mutations) {
                         for (var i = 0; i < mutations.length; i++) {
@@ -367,9 +500,15 @@ class MediaExtractorClient(
                                 if (node && node.nodeType === 1) {
                                     if (node.tagName === 'VIDEO') {
                                         checkVideoElement(node);
-                                    } else if (node.getElementsByTagName) {
-                                        var vids = node.getElementsByTagName('video');
-                                        for (var v = 0; v < vids.length; v++) checkVideoElement(vids[v]);
+                                    } else if (node.tagName === 'IFRAME') {
+                                        if (node.src) {
+                                            if (videoRegex.test(node.src) || manifestRegex.test(node.src)) {
+                                                reportVideo(node.src, "", "", "", "");
+                                            }
+                                            checkUrlParametersForStreams(node.src);
+                                        }
+                                    } else {
+                                        deepTraverseElements(node, 0);
                                     }
                                 }
                             }
@@ -407,14 +546,12 @@ class MediaExtractorClient(
     override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
         val url = request?.url?.toString() ?: return false
 
-        // Block external schemes (intent://, market://, tel:, etc.) from rogue ad redirects
         val scheme = request.url?.scheme?.lowercase()
         if (scheme != null && scheme != "http" && scheme != "https" && scheme != "about" && scheme != "data" && scheme != "javascript") {
             Log.d(TAG, "Blocked external scheme navigation: $url")
             return true
         }
         
-        // Hardening: Reject cleartext HTTP navigation for public (non-local) sites, force upgrade to HTTPS
         if (url.startsWith("http://") && !isLocalUrl(url)) {
             val secureUrl = url.replaceFirst("http://", "https://")
             view?.loadUrl(secureUrl)
@@ -430,12 +567,21 @@ class MediaExtractorClient(
             if (isAdBlockEnabled()) {
                 val host = request.url.host
                 if (host != null && isAdHost(host)) {
-                    // Block by returning an empty plain text response
                     return WebResourceResponse("text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0)))
                 }
             }
 
-            // Cache request headers (Cookies, User-Agent, Referer, Origin) for anti-hotlink proxy and downloads
+            // DRM Signature check in network requests
+            val lowerUrl = url.lowercase()
+            if (lowerUrl.contains("widevine") || lowerUrl.contains("license.uat") || lowerUrl.contains("/widevine/")) {
+                onDrmDetected?.invoke("Widevine DRM", url)
+            } else if (lowerUrl.contains("playready")) {
+                onDrmDetected?.invoke("PlayReady DRM", url)
+            } else if (lowerUrl.contains("fairplay")) {
+                onDrmDetected?.invoke("FairPlay DRM", url)
+            }
+
+            // Cache request headers for anti-hotlink proxy and downloads
             val headers = request.requestHeaders?.toMutableMap() ?: mutableMapOf()
             val cookies = try { android.webkit.CookieManager.getInstance().getCookie(url) } catch (e: Exception) { null }
             if (!cookies.isNullOrEmpty() && !headers.containsKey("Cookie")) {
@@ -445,16 +591,49 @@ class MediaExtractorClient(
                 LocalMediaProxy.registerUrlHeaders(url, headers)
             }
 
+            // Deep query parameter unpacking: extract nested streaming URLs and base64 strings
+            inspectQueryParameters(request.url)
+
             if (isMediaUrl(url, headers)) {
                 val filename = extractFilenameFromUrl(url)
-                onMediaDiscovered(ExtractedVideo(url = url, title = filename))
+                val isDrm = lowerUrl.contains("widevine") || lowerUrl.contains("playready") || lowerUrl.contains("fairplay")
+                val drmSystem = if (isDrm) (if (lowerUrl.contains("widevine")) "Widevine" else "PlayReady") else null
+                onMediaDiscovered(ExtractedVideo(
+                    url = url,
+                    title = filename,
+                    isDrmProtected = isDrm,
+                    drmKeySystem = drmSystem
+                ))
             }
         }
         return super.shouldInterceptRequest(view, request)
     }
 
+    private fun inspectQueryParameters(uri: Uri?) {
+        if (uri == null || !uri.isHierarchical) return
+        try {
+            for (paramName in uri.queryParameterNames) {
+                val paramVal = uri.getQueryParameter(paramName) ?: continue
+                if (paramVal.startsWith("http://") || paramVal.startsWith("https://")) {
+                    if (isMediaUrl(paramVal)) {
+                        val clean = extractFilenameFromUrl(paramVal)
+                        onMediaDiscovered(ExtractedVideo(url = paramVal, title = clean))
+                    }
+                } else if (paramVal.length > 20 && !paramVal.contains(" ")) {
+                    // Try decoding base64-encoded stream parameter
+                    try {
+                        val decoded = String(Base64.decode(paramVal, Base64.DEFAULT), Charsets.UTF_8)
+                        if ((decoded.startsWith("http://") || decoded.startsWith("https://")) && isMediaUrl(decoded)) {
+                            val clean = extractFilenameFromUrl(decoded)
+                            onMediaDiscovered(ExtractedVideo(url = decoded, title = clean))
+                        }
+                    } catch (e: Exception) {}
+                }
+            }
+        } catch (e: Exception) {}
+    }
+
     private fun isAdHost(host: String): Boolean {
-        // Fast path: check the dynamic ConcurrentHashMap set (thread-safe O(1) reads)
         if (adHostsSet.isNotEmpty()) {
             var current = host
             while (current.contains(".")) {
@@ -463,7 +642,6 @@ class MediaExtractorClient(
             }
             if (adHostsSet.contains(current)) return true
         }
-        // Fallback: static emergency list (covers startup window before async load finishes)
         if (AD_DOMAINS.contains(host)) return true
         for (adDomain in AD_DOMAINS) {
             if (host.endsWith(".$adDomain")) return true
@@ -471,7 +649,7 @@ class MediaExtractorClient(
         return false
     }
 
-    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
         if (url != null) {
             onPageStarted(url)
@@ -480,15 +658,12 @@ class MediaExtractorClient(
 
     override fun onPageFinished(view: WebView?, url: String?) {
         super.onPageFinished(view, url)
-        // Inject DOM Parser script — runs in page context, only after page fully loads
         view?.evaluateJavascript(DOM_SCRAPER_SCRIPT, null)
 
-        // Cosmetic ad blocking: hide blocked ad containers and empty placeholders
         if (isAdBlockEnabled()) {
             view?.evaluateJavascript(COSMETIC_ADBLOCK_CSS, null)
         }
         
-        // Inject viewport spoofing if desktop mode is enabled
         if (isDesktopMode()) {
             val desktopViewportScript = """
                 (function() {
@@ -548,18 +723,25 @@ class MediaExtractorClient(
 
     /**
      * Interface bound to 'AndroidApp' namespace.
-     * Hardened to accept only formatted JSON payloads and parse them securely.
+     * Securely decodes extracted streams and receives EME DRM detection events.
      */
-    class WebAppInterface(private val onVideosFound: (List<ExtractedVideo>) -> Unit) {
+    class WebAppInterface(
+        private val onVideosFound: (List<ExtractedVideo>) -> Unit,
+        private val onDrmDetected: ((keySystem: String, url: String) -> Unit)? = null
+    ) {
         @JavascriptInterface
         fun postMessage(json: String) {
             try {
-                // Safeguard parsing via kotlinx.serialization
                 val list = Json.decodeFromString<List<ExtractedVideo>>(json)
                 onVideosFound(list)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed parsing extracted videos JSON", e)
             }
+        }
+
+        @JavascriptInterface
+        fun postDrmDetected(keySystem: String, url: String) {
+            onDrmDetected?.invoke(keySystem, url)
         }
     }
 }

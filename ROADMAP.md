@@ -21,9 +21,9 @@
 - [x] **System Media Session**: Android lock screen and notification media controls (`MediaSession`).
 
 ### 4. Stream Extraction Intelligence
-- [ ] **Deep iFrame Scraping**: Detect streams within nested cross-origin sandbox iframes.
-- [ ] **User-Agent Presets**: 1-tap presets (iPad Safari, Smart TV) to bypass anti-mobile stream blocks.
-- [ ] **DRM Detection**: Graceful notification for Widevine-protected content that cannot be cast.
+- [x] **Deep iFrame Scraping**: Detect streams within nested cross-origin sandbox iframes.
+- [x] **User-Agent Presets**: 1-tap presets (iPad Safari, Smart TV) to bypass anti-mobile stream blocks.
+- [x] **DRM Detection**: Graceful notification for Widevine-protected content that cannot be cast.
 
 ### 5. Media Hub
 - [ ] **Offline Audio Mode**: Music player tab that casts audio while displaying a pure black screen (`#000000`) on TV.

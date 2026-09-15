@@ -835,6 +835,8 @@ class MainActivity : ComponentActivity() {
         var isAdBlockEnabled by remember { mutableStateOf(true) }
         var isPopupsEnabled by remember { mutableStateOf(false) }
         var isDesktopMode by remember { mutableStateOf(false) }
+        var showUserAgentDialog by remember { mutableStateOf(false) }
+        var currentUaMode by remember { mutableStateOf(UserAgentManager.getUaMode(context)) }
         var loadingProgress by remember { mutableStateOf(0f) }
         var isLoading by remember { mutableStateOf(false) }
         var lastLoadedTabId by remember { mutableStateOf(activeTabId) }
@@ -1288,6 +1290,34 @@ class MainActivity : ComponentActivity() {
                                         }
                                     )
 
+                                    // User-Agent Presets
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Text("User-Agent Presets")
+                                                val activePresetName = UserAgentManager.PRESETS.firstOrNull { it.id == currentUaMode }?.name ?: "Default"
+                                                Text(
+                                                    activePresetName,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Build,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                                        onClick = {
+                                            showMoreActionsSheet = false
+                                            showUserAgentDialog = true
+                                        }
+                                    )
+
                                     // Desktop Site toggle
                                     DropdownMenuItem(
                                         text = { Text("Desktop Site") },
@@ -1303,6 +1333,8 @@ class MainActivity : ComponentActivity() {
                                                 checked = isDesktopMode,
                                                 onCheckedChange = {
                                                     isDesktopMode = it
+                                                    currentUaMode = if (it) UserAgentManager.MODE_DESKTOP else UserAgentManager.MODE_DEFAULT
+                                                    UserAgentManager.setUaMode(context, currentUaMode)
                                                     showMoreActionsSheet = false
                                                 },
                                                 modifier = Modifier.scale(0.8f)
@@ -1310,7 +1342,10 @@ class MainActivity : ComponentActivity() {
                                         },
                                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                                         onClick = {
-                                            isDesktopMode = !isDesktopMode
+                                            val next = !isDesktopMode
+                                            isDesktopMode = next
+                                            currentUaMode = if (next) UserAgentManager.MODE_DESKTOP else UserAgentManager.MODE_DEFAULT
+                                            UserAgentManager.setUaMode(context, currentUaMode)
                                             showMoreActionsSheet = false
                                         }
                                     )
@@ -1709,7 +1744,7 @@ class MainActivity : ComponentActivity() {
                             webView = this
                             webViewClient = MediaExtractorClient(
                                 isAdBlockEnabled = { isAdBlockEnabled },
-                                isDesktopMode = { isDesktopMode },
+                                isDesktopMode = { isDesktopMode || currentUaMode == UserAgentManager.MODE_DESKTOP },
                                 onPageStarted = { newUrl ->
                                     val directVideo = selectedVideoToCast?.takeIf {
                                         isDirectVideoLink(it.url) && (it.url == newUrl || newUrl.startsWith("https://html.duckduckgo.com") || newUrl == "about:blank")
@@ -1725,6 +1760,15 @@ class MainActivity : ComponentActivity() {
                                     }
                                     if (isHistoryEnabled) {
                                         recordUrlToHistory(context, newUrl)
+                                    }
+                                },
+                                onDrmDetected = { keySystem, streamUrl ->
+                                    lifecycleScope.launch {
+                                        val idx = extractedVideos.indexOfFirst { it.url == streamUrl || streamUrl.contains(it.url) }
+                                        if (idx != -1) {
+                                            extractedVideos[idx] = extractedVideos[idx].copy(isDrmProtected = true, drmKeySystem = keySystem)
+                                        }
+                                        Toast.makeText(this@MainActivity, "🔒 $keySystem Protected Content: DRM streams cannot be cast to TV.", Toast.LENGTH_LONG).show()
                                     }
                                 }
                             ) { video ->
@@ -1792,19 +1836,36 @@ class MainActivity : ComponentActivity() {
                             }
 
                             addJavascriptInterface(
-                                MediaExtractorClient.WebAppInterface { list ->
-                                    lifecycleScope.launch {
-                                        list.forEach { video ->
-                                            if (!MediaExtractorClient.isSegmentUrl(video.url)) {
-                                                val cleanTitle = MediaExtractorClient.extractFilenameFromUrl(video.url)
-                                                val normalized = video.copy(title = cleanTitle)
-                                                if (extractedVideos.none { it.url == normalized.url }) {
-                                                    extractedVideos.add(normalized)
+                                MediaExtractorClient.WebAppInterface(
+                                    onVideosFound = { list ->
+                                        lifecycleScope.launch {
+                                            list.forEach { video ->
+                                                if (!MediaExtractorClient.isSegmentUrl(video.url)) {
+                                                    val cleanTitle = MediaExtractorClient.extractFilenameFromUrl(video.url)
+                                                    val normalized = video.copy(title = cleanTitle)
+                                                    val existingIdx = extractedVideos.indexOfFirst { it.url == normalized.url }
+                                                    if (existingIdx == -1) {
+                                                        extractedVideos.add(normalized)
+                                                    } else if (normalized.isDrmProtected) {
+                                                        extractedVideos[existingIdx] = extractedVideos[existingIdx].copy(
+                                                            isDrmProtected = true,
+                                                            drmKeySystem = normalized.drmKeySystem
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
+                                    },
+                                    onDrmDetected = { keySystem, streamUrl ->
+                                        lifecycleScope.launch {
+                                            val idx = extractedVideos.indexOfFirst { it.url == streamUrl || streamUrl.contains(it.url) }
+                                            if (idx != -1) {
+                                                extractedVideos[idx] = extractedVideos[idx].copy(isDrmProtected = true, drmKeySystem = keySystem)
+                                            }
+                                            Toast.makeText(this@MainActivity, "🔒 $keySystem Protected Content: DRM streams cannot be cast to TV.", Toast.LENGTH_LONG).show()
+                                        }
                                     }
-                                },
+                                ),
                                 "AndroidApp"
                             )
 
@@ -1839,15 +1900,12 @@ class MainActivity : ComponentActivity() {
                         if (defaultUserAgent == null) {
                             defaultUserAgent = view.settings.userAgentString
                         }
-                        val targetUA = if (isDesktopMode) {
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        } else {
-                            defaultUserAgent
-                        }
+                        val targetUA = UserAgentManager.getActiveUserAgent(context, defaultUserAgent)
+                        val isDesktop = currentUaMode == UserAgentManager.MODE_DESKTOP || isDesktopMode
                         if (targetUA != null && view.settings.userAgentString != targetUA) {
                             view.settings.userAgentString = targetUA
-                            view.settings.useWideViewPort = isDesktopMode
-                            view.settings.loadWithOverviewMode = isDesktopMode
+                            view.settings.useWideViewPort = isDesktop
+                            view.settings.loadWithOverviewMode = isDesktop
                             view.reload()
                         }
 
@@ -2229,6 +2287,27 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        if (showUserAgentDialog) {
+            UserAgentPresetsDialog(
+                context = context,
+                currentUaMode = currentUaMode,
+                onDismiss = { showUserAgentDialog = false },
+                onPresetSelected = { newMode, customUa ->
+                    currentUaMode = newMode
+                    UserAgentManager.setUaMode(context, newMode, customUa)
+                    isDesktopMode = newMode == UserAgentManager.MODE_DESKTOP
+                    val targetUA = UserAgentManager.getActiveUserAgent(context, defaultUserAgent)
+                    webView?.settings?.userAgentString = targetUA
+                    webView?.settings?.useWideViewPort = isDesktopMode
+                    webView?.settings?.loadWithOverviewMode = isDesktopMode
+                    webView?.reload()
+                    showUserAgentDialog = false
+                    val presetName = UserAgentManager.PRESETS.firstOrNull { it.id == newMode }?.name ?: "Default"
+                    Toast.makeText(context, "User-Agent switched to: $presetName", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+
         // Redesigned Cast Streams Selection Dialog
         if (showCastDialog) {
             Dialog(
@@ -2362,6 +2441,22 @@ class MainActivity : ComponentActivity() {
                                                         }
                                                     }
                                                 }
+
+                                                if (video.isDrmProtected) {
+                                                    Spacer(modifier = Modifier.height(3.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+                                                    ) {
+                                                        Text(
+                                                            text = "🔒 ${video.drmKeySystem ?: "Widevine"} DRM",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = MaterialTheme.colorScheme.error,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                             Spacer(modifier = Modifier.width(6.dp))
                                             RadioButton(
@@ -2370,6 +2465,34 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        val isDrm = selectedVideoToCast?.isDrmProtected == true
+                        if (isDrm) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = "Protected Stream: Encrypted with ${selectedVideoToCast?.drmKeySystem ?: "Widevine"} DRM. Content security policies prevent direct network casting to standard TV receivers.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
                                 }
                             }
                         }
@@ -2423,7 +2546,7 @@ class MainActivity : ComponentActivity() {
                                                         Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
                                                     }
                                                 },
-                                                enabled = selectedVideoToCast != null,
+                                                enabled = selectedVideoToCast != null && !isDrm,
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
                                                 Text("Queue")
@@ -2436,14 +2559,14 @@ class MainActivity : ComponentActivity() {
                                                         castToDevice(activeDevice, video.url, video.title, portToUse)
                                                     }
                                                 },
-                                                enabled = selectedVideoToCast != null,
+                                                enabled = selectedVideoToCast != null && !isDrm,
                                                 shape = RoundedCornerShape(12.dp)
                                             ) {
-                                                Text(if (savedPos > 15.0) "Cast 0:00" else "Cast Now")
+                                                Text(if (isDrm) "DRM Locked" else if (savedPos > 15.0) "Cast 0:00" else "Cast Now")
                                             }
                                         }
 
-                                        if (savedPos > 15.0) {
+                                        if (savedPos > 15.0 && !isDrm) {
                                             FilledTonalButton(
                                                 onClick = {
                                                     selectedVideoToCast?.let { video ->
@@ -3130,6 +3253,21 @@ private fun WebStreamCard(
                         }
                     }
 
+                    if (video.isDrmProtected) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "DRM ${video.drmKeySystem ?: "Protected"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
                     if (video.size.isNotEmpty()) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -3194,24 +3332,40 @@ private fun WebStreamCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = onCast,
+                        onClick = {
+                            if (video.isDrmProtected) {
+                                Toast.makeText(context, "Cannot cast DRM-protected content (${video.drmKeySystem ?: "Encrypted"})", Toast.LENGTH_LONG).show()
+                            } else {
+                                onCast()
+                            }
+                        },
                         modifier = Modifier.weight(1f),
+                        enabled = !video.isDrmProtected,
+                        colors = if (video.isDrmProtected) ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ) else ButtonDefaults.buttonColors(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.PlayArrow,
+                            imageVector = if (video.isDrmProtected) LockIcon else Icons.Default.PlayArrow,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Cast", fontWeight = FontWeight.Bold)
+                        Text(if (video.isDrmProtected) "DRM Locked" else "Cast", fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
                         onClick = {
-                            CastSessionManager.addToQueue(video)
-                            Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
+                            if (video.isDrmProtected) {
+                                Toast.makeText(context, "Cannot queue DRM-protected stream", Toast.LENGTH_SHORT).show()
+                            } else {
+                                CastSessionManager.addToQueue(video)
+                                Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
+                            }
                         },
+                        enabled = !video.isDrmProtected,
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Queue")
@@ -3529,4 +3683,118 @@ class IncognitoEditText @JvmOverloads constructor(
         }
         return connection
     }
+}
+
+@Composable
+private fun UserAgentPresetsDialog(
+    context: Context,
+    currentUaMode: String,
+    onDismiss: () -> Unit,
+    onPresetSelected: (String, String?) -> Unit
+) {
+    var selectedMode by remember { mutableStateOf(currentUaMode) }
+    var customUaText by remember { mutableStateOf(UserAgentManager.getCustomUserAgent(context)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    "User-Agent Presets",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Bypass mobile-only blocks and force streaming websites to provide direct, clean HLS (.m3u8) streams.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                UserAgentManager.PRESETS.forEach { preset ->
+                    val isSelected = selectedMode == preset.id
+                    OutlinedCard(
+                        onClick = { selectedMode = preset.id },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.outlinedCardColors(
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else Color.Transparent
+                        ),
+                        border = BorderStroke(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = { selectedMode = preset.id }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = preset.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = preset.description,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (selectedMode == UserAgentManager.MODE_CUSTOM) {
+                    OutlinedTextField(
+                        value = customUaText,
+                        onValueChange = { customUaText = it },
+                        label = { Text("Custom User-Agent String") },
+                        placeholder = { Text("Mozilla/5.0...") },
+                        maxLines = 3,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onPresetSelected(selectedMode, if (selectedMode == UserAgentManager.MODE_CUSTOM) customUaText else null)
+                },
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Apply & Reload")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
