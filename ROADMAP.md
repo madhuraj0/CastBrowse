@@ -30,12 +30,12 @@
 - [x] **Photo Slideshows**: Cast local folders or selected photos with transition timers.
 
 ### 6. UI Polish & Aesthetics
-- [ ] **App-Wide Glassmorphic Design Language**: Extend a unified frosted-glass aesthetic throughout the entire application—applying translucent acrylic surfaces, specular rim gradients, soft ambient depth, and tactile micro-interactions to headers, cards, dialogs, and controller panels.
-- [ ] **Floating Glassmorphic Bottom Bar**: Floating translucent capsule with specular rim gradient, liquid selection indicator, and automatic system inset handling.
-- [ ] **Home & New Tab Bookmarks / Speed Dial**: Pin, add, and manage favorite streaming site shortcuts and bookmarks on the home / new tab page.
-- [ ] **Fluid Physics & Micro-Animations**: Smooth spring-based transitions, liquid page shifts, sheet expands, and tactile touch feedback across all screens.
-- [ ] **Desktop Site Icon**: Replace gear icon with monitor/desktop icon.
-- [ ] **Dismiss Individual Items**: Delete single stream or device video from cards.
+- [x] **App-Wide Glassmorphic Design Language**: Extend a unified frosted-glass aesthetic throughout the entire application—applying translucent acrylic surfaces, specular rim gradients, soft ambient depth, and tactile micro-interactions to headers, cards, dialogs, and controller panels.
+- [x] **Floating Glassmorphic Bottom Bar**: Floating translucent capsule with specular rim gradient, liquid selection indicator, and automatic system inset handling.
+- [x] **Home & New Tab Bookmarks / Speed Dial**: Pin, add, and manage favorite streaming site shortcuts and bookmarks on the home / new tab page.
+- [x] **Fluid Physics & Micro-Animations**: Smooth spring-based transitions, liquid page shifts, sheet expands, and tactile touch feedback across all screens.
+- [x] **Desktop Site Icon**: Replace gear icon with monitor/desktop icon.
+- [x] **Dismiss Individual Items**: Delete single stream or device video from cards.
 
 ### 7. Code Quality, Testing & CI/CD
 - [ ] **Unit & Integration Tests**: Test suite for proxy partial content (206), HLS rewrites, and adblock.

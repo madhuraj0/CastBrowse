@@ -18,6 +18,8 @@ import android.provider.OpenableColumns
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.*
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -336,6 +338,42 @@ private val PhotoIcon: ImageVector by lazy {
         lineTo(19f, 18f)
         horizontalLineTo(5f)
         lineTo(8.5f, 13.5f)
+        close()
+    }.build()
+}
+
+// Inline Desktop Monitor icon for Desktop Site toggle
+private val DesktopMonitorIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(21f, 2f)
+        horizontalLineTo(3f)
+        curveTo(1.9f, 2f, 1f, 2.9f, 1f, 4f)
+        verticalLineTo(16f)
+        curveTo(1f, 17.1f, 1.9f, 18f, 3f, 18f)
+        horizontalLineTo(10f)
+        verticalLineTo(20f)
+        horizontalLineTo(8f)
+        verticalLineTo(22f)
+        horizontalLineTo(16f)
+        verticalLineTo(20f)
+        horizontalLineTo(14f)
+        verticalLineTo(18f)
+        horizontalLineTo(21f)
+        curveTo(22.1f, 18f, 23f, 17.1f, 23f, 16f)
+        verticalLineTo(4f)
+        curveTo(23f, 2.9f, 22.1f, 2f, 21f, 2f)
+        close()
+        moveTo(21f, 16f)
+        horizontalLineTo(3f)
+        verticalLineTo(4f)
+        horizontalLineTo(21f)
+        verticalLineTo(16f)
         close()
     }.build()
 }
@@ -1447,7 +1485,7 @@ class MainActivity : ComponentActivity() {
                                         text = { Text("Desktop Site") },
                                         leadingIcon = {
                                             Icon(
-                                                Icons.Default.Settings,
+                                                DesktopMonitorIcon,
                                                 contentDescription = null,
                                                 tint = if (isDesktopMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
@@ -1813,56 +1851,15 @@ class MainActivity : ComponentActivity() {
                     if (currentNavTab == 0 && isBottomAddressBar) {
                         browserControls(true)
                     }
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 4.dp,
-                        modifier = Modifier.height(64.dp)
-                    ) {
-                        NavigationBarItem(
-                            selected = currentNavTab == 0,
-                            onClick = { currentNavTab = 0 },
-                            icon = {
-                                Icon(
-                                    imageVector = Icons.Default.Home,
-                                    contentDescription = "Browser"
-                                )
-                            },
-                            label = { Text("Browser", style = MaterialTheme.typography.labelMedium) },
-                            colors = NavigationBarItemDefaults.colors(
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                            )
-                        )
-                        NavigationBarItem(
-                            selected = currentNavTab == 1,
-                            onClick = { currentNavTab = 1 },
-                            icon = {
-                                BadgedBox(
-                                    badge = {
-                                        if (extractedVideos.isNotEmpty()) {
-                                            Badge(
-                                                containerColor = MaterialTheme.colorScheme.primary,
-                                                contentColor = MaterialTheme.colorScheme.onPrimary
-                                            ) {
-                                                Text(
-                                                    if (extractedVideos.size > 99) "99+" else "${extractedVideos.size}",
-                                                    style = MaterialTheme.typography.labelSmall
-                                                )
-                                            }
-                                        }
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Media Hub"
-                                    )
-                                }
-                            },
-                            label = { Text("Media Hub", style = MaterialTheme.typography.labelMedium) },
-                            colors = NavigationBarItemDefaults.colors(
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer
-                            )
-                        )
-                    }
+                    val isAmoled = themeMode == "amoled"
+                    val isDark = themeMode != "light"
+                    FloatingGlassmorphicBottomBar(
+                        currentNavTab = currentNavTab,
+                        onTabSelected = { currentNavTab = it },
+                        extractedVideoCount = extractedVideos.size,
+                        isDark = isDark,
+                        isAmoled = isAmoled
+                    )
                 }
             }
         ) { paddingValues ->
@@ -2085,14 +2082,55 @@ class MainActivity : ComponentActivity() {
                         trackColor = Color.Transparent
                     )
                 }
+
+                // Home & New Tab Speed Dial Bookmarks Overlay
+                val isHomeTab = activeTab.url == "https://html.duckduckgo.com" ||
+                                activeTab.url == "https://html.duckduckgo.com/" ||
+                                activeTab.url.startsWith("https://html.duckduckgo.com/html") ||
+                                activeTab.url == "about:blank" ||
+                                activeTab.url.isEmpty()
+                var hideSpeedDial by remember(activeTabId, activeTab.url) { mutableStateOf(false) }
+
+                if (isHomeTab && !hideSpeedDial) {
+                    val isAmoled = themeMode == "amoled"
+                    val isDark = themeMode != "light"
+                    SpeedDialHomeScreen(
+                        onOpenUrl = { targetUrl ->
+                            handleUrlInput(targetUrl)
+                        },
+                        onDismissToHome = {
+                            hideSpeedDial = true
+                        },
+                        isDark = isDark,
+                        isAmoled = isAmoled,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(1.5f)
+                    )
+                }
             }
 
-            // Dedicated Media Hub Page
-            if (currentNavTab == 1) {
+            // Dedicated Media Hub Page with Fluid Physics Spring Transition
+            AnimatedVisibility(
+                visible = currentNavTab == 1,
+                enter = slideInVertically(
+                    initialOffsetY = { it / 6 },
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it / 6 },
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                ) + fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMediumLow)),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(2f)
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .zIndex(2f)
                         .background(MaterialTheme.colorScheme.background)
                 ) {
                     MediaHubPage(
@@ -2154,6 +2192,22 @@ class MainActivity : ComponentActivity() {
                             CastSessionManager.photoSlideshowList.clear()
                             CastSessionManager.isSlideshowPlaying = false
                             CastSessionManager.currentPhotoIndex = 0
+                        },
+                        onDismissExtracted = { video ->
+                            extractedVideos.removeAll { it.url == video.url }
+                            tabVideos[activeTabId] = extractedVideos.toList()
+                        },
+                        onDismissVideo = { item ->
+                            pickedVideos.removeAll { it.uri == item.uri }
+                        },
+                        onDismissAudio = { item ->
+                            pickedAudios.removeAll { it.uri == item.uri }
+                        },
+                        onDismissPhoto = { photo ->
+                            CastSessionManager.photoSlideshowList.removeAll { it.uri == photo.uri }
+                            if (CastSessionManager.currentPhotoIndex >= CastSessionManager.photoSlideshowList.size) {
+                                CastSessionManager.currentPhotoIndex = (CastSessionManager.photoSlideshowList.size - 1).coerceAtLeast(0)
+                            }
                         },
                         onSwitchToBrowser = { currentNavTab = 0 }
                     )
@@ -3075,6 +3129,10 @@ private fun MediaHubPage(
     onClearExtracted: () -> Unit,
     onClearAudios: () -> Unit,
     onClearPhotos: () -> Unit,
+    onDismissExtracted: (ExtractedVideo) -> Unit = {},
+    onDismissVideo: (DeviceVideoItem) -> Unit = {},
+    onDismissAudio: (DeviceAudioItem) -> Unit = {},
+    onDismissPhoto: (DevicePhotoItem) -> Unit = {},
     onSwitchToBrowser: () -> Unit
 ) {
     val context = LocalContext.current
@@ -3284,7 +3342,8 @@ private fun MediaHubPage(
                         items(extractedVideos, key = { it.url }) { video ->
                             WebStreamCard(
                                 video = video,
-                                onCast = { onCastVideo(video.url, video.title) }
+                                onCast = { onCastVideo(video.url, video.title) },
+                                onDismiss = { onDismissExtracted(video) }
                             )
                         }
                     }
@@ -3384,7 +3443,8 @@ private fun MediaHubPage(
                                         receiverIp = CastSessionManager.castingDevice?.ipAddress
                                     )
                                     onCastVideo(proxiedUrl, item.title)
-                                }
+                                },
+                                onDismiss = if (!item.isDownload) { { onDismissVideo(item) } } else null
                             )
                         }
                     }
@@ -3568,7 +3628,8 @@ private fun MediaHubPage(
                                     )
                                     CastSessionManager.addToQueue(ExtractedVideo(proxiedUrl, item.title))
                                     Toast.makeText(context, "Added '${item.title}' to queue", Toast.LENGTH_SHORT).show()
-                                }
+                                },
+                                onDismiss = { onDismissAudio(item) }
                             )
                         }
                     }
@@ -3774,7 +3835,8 @@ private fun MediaHubPage(
                                     onClick = {
                                         CastSessionManager.currentPhotoIndex = idx
                                         onCastPhoto(photo)
-                                    }
+                                    },
+                                    onDismiss = { onDismissPhoto(photo) }
                                 )
                             }
                         }
@@ -3788,7 +3850,8 @@ private fun MediaHubPage(
 @Composable
 private fun WebStreamCard(
     video: ExtractedVideo,
-    onCast: () -> Unit
+    onCast: () -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -3802,12 +3865,14 @@ private fun WebStreamCard(
     }
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-        modifier = Modifier.fillMaxWidth()
+        border = GlassmorphicTheme.specularBorder(width = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp))
     ) {
         Column {
             if (video.poster.isNotEmpty()) {
@@ -3816,18 +3881,38 @@ private fun WebStreamCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(170.dp)
-                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                        .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
                 )
             }
 
             Column(modifier = Modifier.padding(14.dp)) {
-                Text(
-                    text = cleanTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = cleanTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (onDismiss != null) {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Dismiss Stream",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -4044,17 +4129,20 @@ private fun WebStreamCard(
 @Composable
 private fun DeviceVideoCard(
     item: DeviceVideoItem,
-    onCast: () -> Unit
+    onCast: () -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-        modifier = Modifier.fillMaxWidth()
+        border = GlassmorphicTheme.specularBorder(width = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -4063,7 +4151,7 @@ private fun DeviceVideoCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
                     modifier = Modifier.size(44.dp)
                 ) {
@@ -4101,6 +4189,20 @@ private fun DeviceVideoCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                }
+
+                if (onDismiss != null) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss Video",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
@@ -4191,22 +4293,23 @@ private fun DeviceAudioCard(
     item: DeviceAudioItem,
     isCurrentPlaying: Boolean,
     onCast: () -> Unit,
-    onQueue: () -> Unit
+    onQueue: () -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isCurrentPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            containerColor = if (isCurrentPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
         ),
-        border = BorderStroke(
-            1.dp,
-            if (isCurrentPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-            else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+        border = GlassmorphicTheme.specularBorder(
+            width = if (isCurrentPlaying) 1.5.dp else 1.dp
         ),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(18.dp))
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -4215,7 +4318,7 @@ private fun DeviceAudioCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
                     modifier = Modifier.size(44.dp)
                 ) {
@@ -4263,6 +4366,20 @@ private fun DeviceAudioCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                }
+
+                if (onDismiss != null) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss Audio",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
@@ -4341,7 +4458,8 @@ private fun DeviceAudioCard(
 private fun PhotoThumbnailCard(
     photo: DevicePhotoItem,
     isSelected: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDismiss: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var thumbnailBitmap by remember(photo.uri) { mutableStateOf<ImageBitmap?>(null) }
@@ -4353,12 +4471,12 @@ private fun PhotoThumbnailCard(
     Surface(
         modifier = Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
-                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-        color = MaterialTheme.colorScheme.surfaceVariant
+                 else GlassmorphicTheme.specularBorder(width = 1.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.40f)
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (thumbnailBitmap != null) {
@@ -4376,6 +4494,28 @@ private fun PhotoThumbnailCard(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.size(32.dp)
                     )
+                }
+            }
+
+            if (onDismiss != null) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .size(22.dp)
+                        .clickable { onDismiss() },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss Photo",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
                 }
             }
 
