@@ -45,11 +45,77 @@ object CastSessionManager {
     var audioTracks by mutableStateOf<List<String>>(emptyList())
     var selectedAudioTrack by mutableStateOf(0)
 
+    /** OLED TV Black Screen Mode (pure #000000 on TV when playing audio) */
+    var isOledBlackScreenEnabled by mutableStateOf(true)
+
+    /** Active media type: "video", "audio", "photo" */
+    var activeMediaType by mutableStateOf("video")
+
+    /** Photo slideshow state */
+    val photoSlideshowList = androidx.compose.runtime.mutableStateListOf<DevicePhotoItem>()
+    var currentPhotoIndex by mutableStateOf(0)
+    var isSlideshowPlaying by mutableStateOf(false)
+    var slideshowIntervalSeconds by mutableStateOf(5)
+
     /** Continuous playback queue */
     val mediaQueue = androidx.compose.runtime.mutableStateListOf<ExtractedVideo>()
 
     var appContext: Context? = null
     var onSessionStateChanged: (() -> Unit)? = null
+
+    fun toggleOledBlackScreen(enabled: Boolean) {
+        isOledBlackScreenEnabled = enabled
+        if (activeMediaType == "audio") {
+            WebReceiverController.setBlackScreen(enabled)
+        }
+    }
+
+    suspend fun castPhoto(photo: DevicePhotoItem, context: Context): Result<Unit> = withContext(Dispatchers.IO) {
+        val device = castingDevice ?: return@withContext Result.failure(Exception("No active cast device"))
+        activeMediaType = "photo"
+        val mime = context.contentResolver.getType(photo.uri) ?: "image/jpeg"
+        val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+            uri = photo.uri,
+            title = photo.title,
+            mimeType = mime,
+            size = photo.size,
+            receiverIp = device.ipAddress
+        )
+        activeMediaUrl = proxiedUrl
+        activeMediaTitle = photo.title
+
+        when (device.protocol) {
+            CastProtocol.WEB_RECEIVER, CastProtocol.GOOGLE_CAST, CastProtocol.DIAL -> {
+                WebReceiverController.showPhoto(proxiedUrl, photo.title)
+                Result.success(Unit)
+            }
+            CastProtocol.DLNA -> {
+                val controlUrl = device.controlUrl ?: "http://${device.ipAddress}:${device.port}/upnp/control/AVTransport1"
+                DlnaClient.play(
+                    controlUrl = controlUrl,
+                    renderingControlUrl = device.renderingControlUrl,
+                    mediaUrl = proxiedUrl,
+                    title = photo.title
+                )
+            }
+            CastProtocol.AIRPLAY -> {
+                AirPlayClient.play(
+                    ipAddress = device.ipAddress,
+                    url = proxiedUrl,
+                    title = photo.title,
+                    port = device.port
+                )
+            }
+            CastProtocol.FCAST -> {
+                FCastClient.play(
+                    ipAddress = device.ipAddress,
+                    url = proxiedUrl,
+                    title = photo.title,
+                    port = device.port
+                )
+            }
+        }
+    }
 
     fun getRecentIps(context: Context): List<String> {
         val prefs = context.getSharedPreferences("cast_prefs", Context.MODE_PRIVATE)
@@ -73,11 +139,19 @@ object CastSessionManager {
         device: CastDevice,
         mediaUrl: String,
         title: String,
+        type: String = activeMediaType,
         onDisconnected: (() -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         castingDevice = device
         activeMediaUrl = mediaUrl
         activeMediaTitle = title
+        activeMediaType = type
+
+        if (type == "audio" && isOledBlackScreenEnabled) {
+            WebReceiverController.setBlackScreen(true)
+        } else if (type == "video") {
+            WebReceiverController.setBlackScreen(false)
+        }
 
         when (device.protocol) {
             CastProtocol.DLNA -> {
@@ -108,11 +182,7 @@ object CastSessionManager {
                 WebReceiverController.play(mediaUrl, title)
                 Result.success(Unit)
             }
-            CastProtocol.GOOGLE_CAST -> {
-                WebReceiverController.play(mediaUrl, title)
-                Result.success(Unit)
-            }
-            CastProtocol.WEB_RECEIVER -> {
+            CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> {
                 WebReceiverController.play(mediaUrl, title)
                 Result.success(Unit)
             }
@@ -179,6 +249,9 @@ object CastSessionManager {
         playbackPositionSeconds = 0.0
         activeMediaUrl = null
         activeMediaTitle = null
+        activeMediaType = "video"
+        isSlideshowPlaying = false
+        WebReceiverController.setBlackScreen(false)
     }
 
     suspend fun setVolume(volume: Float) = withContext(Dispatchers.IO) {

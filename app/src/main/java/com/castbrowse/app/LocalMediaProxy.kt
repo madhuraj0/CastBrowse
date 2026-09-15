@@ -724,6 +724,7 @@ object LocalMediaProxy {
     <div class="status-pill"><div class="status-dot"></div> Web Receiver Ready</div>
     <p class="instructions">Keep this browser tab open on your TV.<br>In CastBrowse, select <b>Web Receiver</b> or cast any video link to start watching.</p>
   </div>
+  <img id="photo" style="display:none; width:100%; height:100%; object-fit:contain; background:#000; position:absolute; inset:0; z-index:5;" alt="Photo" />
   <video id="video" playsinline webkit-playsinline></video>
   <div id="osd">
     <div id="osd-title">Media Stream</div>
@@ -732,6 +733,7 @@ object LocalMediaProxy {
 </div>
 <script>
   const video = document.getElementById('video');
+  const photo = document.getElementById('photo');
   const idleScreen = document.getElementById('idle-screen');
   const osd = document.getElementById('osd');
   const osdTitle = document.getElementById('osd-title');
@@ -781,13 +783,42 @@ object LocalMediaProxy {
         const data = await res.json();
         if (data.version !== lastCommandVersion) {
           lastCommandVersion = data.version;
-          if (data.url && data.url !== currentUrl) {
+
+          if (data.mediaType === 'photo' || (data.photoUrl && data.photoUrl.length > 0)) {
+            if (photo.src !== data.photoUrl) {
+              photo.src = data.photoUrl;
+            }
+            photo.style.display = 'block';
+            video.style.display = 'none';
+            idleScreen.style.display = 'none';
+            osdTitle.textContent = data.title || 'Photo Slideshow';
+            osdTime.textContent = 'Photo Slide';
+            showOsd();
+          } else if (!data.photoUrl && data.mediaType !== 'photo') {
+            photo.style.display = 'none';
+            video.style.display = 'block';
+          }
+
+          if (data.blackScreen) {
+            document.body.style.background = '#000000';
+            document.body.style.cursor = 'none';
+            idleScreen.style.display = 'none';
+            osd.style.display = 'none';
+            photo.style.display = 'none';
+            video.style.opacity = '0';
+          } else {
+            osd.style.display = 'block';
+            video.style.opacity = '1';
+            document.body.style.cursor = 'auto';
+          }
+
+          if (data.url && data.url !== currentUrl && data.mediaType !== 'photo') {
             currentUrl = data.url;
             video.src = data.url;
             osdTitle.textContent = data.title || 'Streaming';
             idleScreen.style.display = 'none';
             video.play().catch(() => {});
-            showOsd();
+            if (!data.blackScreen) showOsd();
           }
           if (data.aspectRatio) {
             video.style.objectFit = data.aspectRatio === 'Fill' ? 'fill' : data.aspectRatio === 'Zoom' ? 'cover' : 'contain';
@@ -821,6 +852,7 @@ object LocalMediaProxy {
             video.removeAttribute('src');
             video.load();
             currentUrl = '';
+            photo.style.display = 'none';
             idleScreen.style.display = 'flex';
           }
         }

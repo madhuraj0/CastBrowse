@@ -160,6 +160,15 @@ object DlnaClient {
             mediaUrl.contains(".mpd", ignoreCase = true) -> "application/dash+xml"
             mediaUrl.contains(".mp3", ignoreCase = true) -> "audio/mpeg"
             mediaUrl.contains(".m4a", ignoreCase = true) -> "audio/mp4"
+            mediaUrl.contains(".aac", ignoreCase = true) -> "audio/aac"
+            mediaUrl.contains(".flac", ignoreCase = true) -> "audio/flac"
+            mediaUrl.contains(".wav", ignoreCase = true) -> "audio/wav"
+            mediaUrl.contains(".ogg", ignoreCase = true) -> "audio/ogg"
+            mediaUrl.contains(".opus", ignoreCase = true) -> "audio/opus"
+            mediaUrl.contains(".jpg", ignoreCase = true) || mediaUrl.contains(".jpeg", ignoreCase = true) -> "image/jpeg"
+            mediaUrl.contains(".png", ignoreCase = true) -> "image/png"
+            mediaUrl.contains(".webp", ignoreCase = true) -> "image/webp"
+            mediaUrl.contains(".gif", ignoreCase = true) -> "image/gif"
             mediaUrl.contains(".webm", ignoreCase = true) -> "video/webm"
             mediaUrl.contains(".mkv", ignoreCase = true) -> "video/x-matroska"
             else -> "video/mp4"
@@ -180,11 +189,16 @@ object DlnaClient {
     private fun buildDidlMetadata(url: String, title: String, mimeType: String): String {
         val escapedTitle = escapeXml(title)
         val escapedUrl = escapeXml(url)
+        val upnpClass = when {
+            mimeType.startsWith("audio/") -> "object.item.audioItem.musicTrack"
+            mimeType.startsWith("image/") -> "object.item.imageItem.photo"
+            else -> "object.item.videoItem"
+        }
         return """
             <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
               <item id="0" parentID="-1" restricted="1">
                 <dc:title>$escapedTitle</dc:title>
-                <upnp:class>object.item.videoItem</upnp:class>
+                <upnp:class>$upnpClass</upnp:class>
                 <res protocolInfo="http-get:*:$mimeType:*">$escapedUrl</res>
               </item>
             </DIDL-Lite>

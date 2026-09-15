@@ -26,8 +26,8 @@
 - [x] **DRM Detection**: Graceful notification for Widevine-protected content that cannot be cast.
 
 ### 5. Media Hub
-- [ ] **Offline Audio Mode**: Music player tab that casts audio while displaying a pure black screen (`#000000`) on TV.
-- [ ] **Photo Slideshows**: Cast local folders or selected photos with transition timers.
+- [x] **Offline Audio Mode**: Music player tab that casts audio while displaying a pure black screen (`#000000`) on TV.
+- [x] **Photo Slideshows**: Cast local folders or selected photos with transition timers.
 
 ### 6. UI Polish & Aesthetics
 - [ ] **App-Wide Glassmorphic Design Language**: Extend a unified frosted-glass aesthetic throughout the entire application—applying translucent acrylic surfaces, specular rim gradients, soft ambient depth, and tactile micro-interactions to headers, cards, dialogs, and controller panels.

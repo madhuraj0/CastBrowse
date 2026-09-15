@@ -113,6 +113,15 @@ object WebReceiverController {
     @Volatile
     var subtitleOffsetMs: Int = 0
 
+    @Volatile
+    var isBlackScreenMode: Boolean = false
+
+    @Volatile
+    var activePhotoUrl: String? = null
+
+    @Volatile
+    var mediaType: String = "video" // "video", "audio", "photo"
+
     fun setSubtitle(url: String?, offsetMs: Int = 0) {
         subtitleUrl = url
         subtitleOffsetMs = offsetMs
@@ -134,6 +143,20 @@ object WebReceiverController {
         commandVersion++
     }
 
+    fun setBlackScreen(enabled: Boolean) {
+        isBlackScreenMode = enabled
+        commandVersion++
+    }
+
+    fun showPhoto(url: String, title: String) {
+        mediaType = "photo"
+        activePhotoUrl = url
+        activeMediaTitle = title
+        pendingCommand = "showPhoto"
+        commandVersion++
+        Log.d(TAG, "WebReceiver: Dispatched showPhoto command for '$title' ($url)")
+    }
+
     fun getStateJson(): String {
         return buildJsonObject {
             put("url", activeMediaUrl ?: "")
@@ -146,6 +169,9 @@ object WebReceiverController {
             put("audioDelayMs", audioDelayMs)
             put("subtitleUrl", subtitleUrl ?: "")
             put("subtitleOffsetMs", subtitleOffsetMs)
+            put("blackScreen", isBlackScreenMode)
+            put("photoUrl", activePhotoUrl ?: "")
+            put("mediaType", mediaType)
         }.toString()
     }
 

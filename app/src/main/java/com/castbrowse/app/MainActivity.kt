@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -283,6 +284,58 @@ private val LockIcon: ImageVector by lazy {
         curveTo(8.9f, 4.29f, 10.29f, 2.9f, 12f, 2.9f)
         curveTo(13.71f, 2.9f, 15.1f, 4.29f, 15.1f, 6f)
         verticalLineTo(8f)
+        close()
+    }.build()
+}
+
+// Inline Music icon
+private val MusicIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(12f, 3f)
+        verticalLineTo(13.55f)
+        curveTo(11.41f, 13.21f, 10.73f, 13f, 10f, 13f)
+        curveTo(7.79f, 13f, 6f, 14.79f, 6f, 17f)
+        curveTo(6f, 19.21f, 7.79f, 21f, 10f, 21f)
+        curveTo(12.21f, 21f, 14f, 19.21f, 14f, 17f)
+        verticalLineTo(7f)
+        horizontalLineTo(18f)
+        verticalLineTo(3f)
+        horizontalLineTo(12f)
+        close()
+    }.build()
+}
+
+// Inline Photo icon
+private val PhotoIcon: ImageVector by lazy {
+    ImageVector.Builder(
+        defaultWidth = 24.dp, defaultHeight = 24.dp,
+        viewportWidth = 24f, viewportHeight = 24f
+    ).path(
+        fill = SolidColor(Color.Black),
+        pathFillType = PathFillType.NonZero
+    ) {
+        moveTo(21f, 19f)
+        verticalLineTo(5f)
+        curveTo(21f, 3.9f, 20.1f, 3f, 19f, 3f)
+        horizontalLineTo(5f)
+        curveTo(3.9f, 3f, 3f, 3.9f, 3f, 5f)
+        verticalLineTo(19f)
+        curveTo(3f, 20.1f, 3.9f, 21f, 5f, 21f)
+        horizontalLineTo(19f)
+        curveTo(20.1f, 21f, 21f, 20.1f, 21f, 19f)
+        close()
+        moveTo(8.5f, 13.5f)
+        lineTo(11f, 16.51f)
+        lineTo(14.5f, 12f)
+        lineTo(19f, 18f)
+        horizontalLineTo(5f)
+        lineTo(8.5f, 13.5f)
         close()
     }.build()
 }
@@ -676,7 +729,14 @@ class MainActivity : ComponentActivity() {
                 cleanUrl.contains(".mp4", ignoreCase = true)
     }
 
-    private fun castToDevice(device: CastDevice, videoUrl: String, videoTitle: String, customFCastPort: Int, resumePosition: Double = 0.0) {
+    private fun castToDevice(
+        device: CastDevice,
+        videoUrl: String,
+        videoTitle: String,
+        customFCastPort: Int,
+        resumePosition: Double = 0.0,
+        type: String = "video"
+    ) {
         lifecycleScope.launch {
             CastSessionManager.isCasting = true
             val targetPort = if (device.port > 0) device.port else customFCastPort
@@ -696,7 +756,7 @@ class MainActivity : ComponentActivity() {
             }
             headers["Sec-Fetch-Mode"] = "cors"
             headers["Sec-Fetch-Site"] = "cross-site"
-            headers["Sec-Fetch-Dest"] = "video"
+            headers["Sec-Fetch-Dest"] = if (type == "audio") "audio" else "video"
             val cookies = try { android.webkit.CookieManager.getInstance().getCookie(videoUrl) } catch (e: Exception) { null }
             if (!cookies.isNullOrEmpty()) {
                 headers["Cookie"] = cookies
@@ -713,7 +773,8 @@ class MainActivity : ComponentActivity() {
             val result = CastSessionManager.play(
                 device = device,
                 mediaUrl = proxiedUrl,
-                title = cleanTitle
+                title = cleanTitle,
+                type = type
             ) {
                 lifecycleScope.launch {
                     CastPlaybackService.stop(this@MainActivity)
@@ -863,6 +924,69 @@ class MainActivity : ComponentActivity() {
                     pickedVideos.add(0, DeviceVideoItem(uri = uri, title = name, size = size, isDownload = false))
                 }
                 Toast.makeText(context, "Selected: $name", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val pickedAudios = remember { mutableStateListOf<DeviceAudioItem>() }
+        val pickAudiosLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetMultipleContents()
+        ) { uris: List<Uri> ->
+            if (uris.isNotEmpty()) {
+                lifecycleScope.launch {
+                    uris.forEach { uri ->
+                        if (pickedAudios.none { it.uri == uri }) {
+                            val item = MediaHubManager.getAudioItemFromUri(context, uri)
+                            pickedAudios.add(item)
+                        }
+                    }
+                    Toast.makeText(context, "Added ${uris.size} audio track(s)", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        val pickPhotosLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.GetMultipleContents()
+        ) { uris: List<Uri> ->
+            if (uris.isNotEmpty()) {
+                lifecycleScope.launch {
+                    uris.forEach { uri ->
+                        if (CastSessionManager.photoSlideshowList.none { it.uri == uri }) {
+                            val item = MediaHubManager.getPhotoItemFromUri(context, uri)
+                            CastSessionManager.photoSlideshowList.add(item)
+                        }
+                    }
+                    Toast.makeText(context, "Added ${uris.size} photo(s)", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        val pickFolderLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocumentTree()
+        ) { treeUri: Uri? ->
+            if (treeUri != null) {
+                lifecycleScope.launch {
+                    val photos = MediaHubManager.loadPhotosFromFolder(context, treeUri)
+                    photos.forEach { photo ->
+                        if (CastSessionManager.photoSlideshowList.none { it.uri == photo.uri }) {
+                            CastSessionManager.photoSlideshowList.add(photo)
+                        }
+                    }
+                    Toast.makeText(context, "Loaded ${photos.size} photo(s) from folder", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        // Slideshow auto-advance timer loop
+        LaunchedEffect(CastSessionManager.isSlideshowPlaying, CastSessionManager.photoSlideshowList.size, CastSessionManager.slideshowIntervalSeconds) {
+            if (CastSessionManager.isSlideshowPlaying && CastSessionManager.photoSlideshowList.isNotEmpty()) {
+                while (CastSessionManager.isSlideshowPlaying && CastSessionManager.photoSlideshowList.isNotEmpty()) {
+                    delay(CastSessionManager.slideshowIntervalSeconds * 1000L)
+                    if (!CastSessionManager.isSlideshowPlaying || CastSessionManager.photoSlideshowList.isEmpty()) break
+                    val nextIdx = (CastSessionManager.currentPhotoIndex + 1) % CastSessionManager.photoSlideshowList.size
+                    CastSessionManager.currentPhotoIndex = nextIdx
+                    val currentPhoto = CastSessionManager.photoSlideshowList[nextIdx]
+                    CastSessionManager.castPhoto(currentPhoto, context)
+                }
             }
         }
 
@@ -1553,8 +1677,13 @@ class MainActivity : ComponentActivity() {
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val mediaIcon = when (CastSessionManager.activeMediaType) {
+                                "audio" -> MusicIcon
+                                "photo" -> PhotoIcon
+                                else -> Icons.Default.PlayArrow
+                            }
                             Icon(
-                                Icons.Default.PlayArrow,
+                                mediaIcon,
                                 contentDescription = "Casting",
                                 tint = miniPlayerContentColor,
                                 modifier = Modifier.size(22.dp)
@@ -1562,29 +1691,45 @@ class MainActivity : ComponentActivity() {
                             Spacer(modifier = Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = activeUrl.substringBefore("?").substringAfterLast("/"),
+                                    text = CastSessionManager.activeMediaTitle ?: activeUrl.substringBefore("?").substringAfterLast("/"),
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     color = miniPlayerContentColor
                                 )
-                                Text(
-                                    text = "▶ ${activeDevice.name}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = miniPlayerContentColor.copy(alpha = 0.7f)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = "▶ ${activeDevice.name}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = miniPlayerContentColor.copy(alpha = 0.7f)
+                                    )
+                                    if (CastSessionManager.activeMediaType == "audio" && CastSessionManager.isOledBlackScreenEnabled) {
+                                        Text(
+                                            text = "• 📺 OLED Black Screen",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    } else if (CastSessionManager.activeMediaType == "photo") {
+                                        Text(
+                                            text = "• 📸 Slideshow",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                }
                             }
                             IconButton(onClick = {
                                 lifecycleScope.launch {
                                     if (CastSessionManager.isMediaPlaying) {
-                                        FCastClient.pause(activeDevice.ipAddress, CastSessionManager.customFcastPort)
-                                        CastSessionManager.isMediaPlaying = false
-                                        CastSessionManager.playbackState = 2
+                                        CastSessionManager.pause()
                                     } else {
-                                        FCastClient.resume(activeDevice.ipAddress, CastSessionManager.customFcastPort)
-                                        CastSessionManager.isMediaPlaying = true
-                                        CastSessionManager.playbackState = 1
+                                        CastSessionManager.resume()
                                     }
                                 }
                             }) {
@@ -1596,11 +1741,8 @@ class MainActivity : ComponentActivity() {
                             }
                             IconButton(onClick = {
                                 lifecycleScope.launch {
-                                    FCastClient.stop(activeDevice.ipAddress, CastSessionManager.customFcastPort)
+                                    CastSessionManager.stop()
                                     CastSessionManager.castingDevice = null
-                                    CastSessionManager.isMediaPlaying = false
-                                    CastSessionManager.activeMediaUrl = null
-                                    CastSessionManager.playbackState = 0
                                 }
                             }) {
                                 Icon(
@@ -1630,7 +1772,7 @@ class MainActivity : ComponentActivity() {
                         TopAppBar(
                             title = {
                                 Text(
-                                    "Streams",
+                                    "Media Hub",
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1711,11 +1853,11 @@ class MainActivity : ComponentActivity() {
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Streams"
+                                        contentDescription = "Media Hub"
                                     )
                                 }
                             },
-                            label = { Text("Streams", style = MaterialTheme.typography.labelMedium) },
+                            label = { Text("Media Hub", style = MaterialTheme.typography.labelMedium) },
                             colors = NavigationBarItemDefaults.colors(
                                 indicatorColor = MaterialTheme.colorScheme.primaryContainer
                             )
@@ -1945,7 +2087,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Dedicated Streams Page
+            // Dedicated Media Hub Page
             if (currentNavTab == 1) {
                 Box(
                     modifier = Modifier
@@ -1953,20 +2095,66 @@ class MainActivity : ComponentActivity() {
                         .zIndex(2f)
                         .background(MaterialTheme.colorScheme.background)
                 ) {
-                    StreamsPage(
+                    MediaHubPage(
                         extractedVideos = extractedVideos,
                         pickedVideos = pickedVideos,
+                        pickedAudios = pickedAudios,
+                        photoSlideshowList = CastSessionManager.photoSlideshowList,
                         onPickVideo = { pickVideoLauncher.launch("video/*") },
+                        onPickAudio = { pickAudiosLauncher.launch("audio/*") },
+                        onPickPhotos = { pickPhotosLauncher.launch("image/*") },
+                        onPickFolder = { pickFolderLauncher.launch(null) },
                         onCastVideo = { url, title ->
                             val activeDevice = CastSessionManager.castingDevice
                             if (activeDevice != null) {
-                                castToDevice(activeDevice, url, title, activeDevice.port)
+                                castToDevice(activeDevice, url, title, activeDevice.port, type = "video")
                             } else {
                                 selectedVideoToCast = ExtractedVideo(url = url, title = title)
                                 showCastDialog = true
                             }
                         },
+                        onCastAudio = { audioItem ->
+                            val activeDevice = CastSessionManager.castingDevice
+                            val mime = context.contentResolver.getType(audioItem.uri) ?: "audio/mpeg"
+                            val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+                                uri = audioItem.uri,
+                                title = audioItem.title,
+                                mimeType = mime,
+                                size = audioItem.size,
+                                receiverIp = activeDevice?.ipAddress
+                            )
+                            if (activeDevice != null) {
+                                castToDevice(activeDevice, proxiedUrl, audioItem.title, activeDevice.port, type = "audio")
+                            } else {
+                                selectedVideoToCast = ExtractedVideo(url = proxiedUrl, title = audioItem.title)
+                                showCastDialog = true
+                            }
+                        },
+                        onCastPhoto = { photoItem ->
+                            val activeDevice = CastSessionManager.castingDevice
+                            if (activeDevice != null) {
+                                lifecycleScope.launch {
+                                    CastSessionManager.castPhoto(photoItem, context)
+                                }
+                            } else {
+                                val mime = context.contentResolver.getType(photoItem.uri) ?: "image/jpeg"
+                                val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+                                    uri = photoItem.uri,
+                                    title = photoItem.title,
+                                    mimeType = mime,
+                                    size = photoItem.size
+                                )
+                                selectedVideoToCast = ExtractedVideo(url = proxiedUrl, title = photoItem.title)
+                                showCastDialog = true
+                            }
+                        },
                         onClearExtracted = { extractedVideos.clear() },
+                        onClearAudios = { pickedAudios.clear() },
+                        onClearPhotos = {
+                            CastSessionManager.photoSlideshowList.clear()
+                            CastSessionManager.isSlideshowPlaying = false
+                            CastSessionManager.currentPhotoIndex = 0
+                        },
                         onSwitchToBrowser = { currentNavTab = 0 }
                     )
                 }
@@ -2872,16 +3060,25 @@ private fun getLocalVideoInfo(context: Context, uri: Uri): Pair<String, Long> {
 }
 
 @Composable
-private fun StreamsPage(
+private fun MediaHubPage(
     extractedVideos: List<ExtractedVideo>,
     pickedVideos: List<DeviceVideoItem>,
+    pickedAudios: List<DeviceAudioItem>,
+    photoSlideshowList: List<DevicePhotoItem>,
     onPickVideo: () -> Unit,
+    onPickAudio: () -> Unit,
+    onPickPhotos: () -> Unit,
+    onPickFolder: () -> Unit,
     onCastVideo: (url: String, title: String) -> Unit,
+    onCastAudio: (item: DeviceAudioItem) -> Unit,
+    onCastPhoto: (item: DevicePhotoItem) -> Unit,
     onClearExtracted: () -> Unit,
+    onClearAudios: () -> Unit,
+    onClearPhotos: () -> Unit,
     onSwitchToBrowser: () -> Unit
 ) {
     val context = LocalContext.current
-    var subTab by remember { mutableStateOf(0) } // 0 = Web Streams, 1 = Device Videos
+    var subTab by remember { mutableStateOf(0) } // 0 = Web Streams, 1 = Device Videos, 2 = Audio, 3 = Photos
 
     val downloadedVideos = remember(subTab) {
         DownloadHelper.getDownloads(context).filter {
@@ -2898,15 +3095,16 @@ private fun StreamsPage(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Option A: Top Tabs (Web Streams | Device Videos)
+        // Media Hub Top Tabs: Web Streams | Device Videos | Audio & Music | Photos & Slideshow
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 1.dp
         ) {
-            TabRow(
+            ScrollableTabRow(
                 selectedTabIndex = subTab,
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.primary,
+                edgePadding = 12.dp,
                 divider = {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
                 }
@@ -2928,6 +3126,26 @@ private fun StreamsPage(
                         Text(
                             text = if (allDeviceVideos.isNotEmpty()) "Device Videos (${allDeviceVideos.size})" else "Device Videos",
                             fontWeight = if (subTab == 1) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                )
+                Tab(
+                    selected = subTab == 2,
+                    onClick = { subTab = 2 },
+                    text = {
+                        Text(
+                            text = if (pickedAudios.isNotEmpty()) "Audio & Music (${pickedAudios.size})" else "Audio & Music",
+                            fontWeight = if (subTab == 2) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
+                )
+                Tab(
+                    selected = subTab == 3,
+                    onClick = { subTab = 3 },
+                    text = {
+                        Text(
+                            text = if (photoSlideshowList.isNotEmpty()) "Photos (${photoSlideshowList.size})" else "Photos",
+                            fontWeight = if (subTab == 3) FontWeight.Bold else FontWeight.Normal
                         )
                     }
                 )
@@ -2989,134 +3207,420 @@ private fun StreamsPage(
             }
         }
 
-        // Content: Web Streams vs Device Videos
-        if (subTab == 0) {
-            // WEB STREAMS
-            if (extractedVideos.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+        // SubTab Content: 0 = Web Streams, 1 = Device Videos, 2 = Audio, 3 = Photos
+        when (subTab) {
+            0 -> {
+                // WEB STREAMS
+                if (extractedVideos.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(60.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(30.dp)
-                                )
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.size(60.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                "No streams detected",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Navigate to video sites or play any video in the browser to extract streaming URLs.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Button(
+                                onClick = onSwitchToBrowser,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Open Browser")
                             }
                         }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            "No streams detected",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            "${extractedVideos.size} streams captured",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            "Navigate to video sites or play any video in the browser to extract streaming URLs.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Button(
-                            onClick = onSwitchToBrowser,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Home, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Open Browser")
+                        TextButton(onClick = onClearExtracted) {
+                            Text("Clear All", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                         }
                     }
-                }
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "${extractedVideos.size} streams captured",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TextButton(onClick = onClearExtracted) {
-                        Text("Clear All", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                    }
-                }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(extractedVideos, key = { it.url }) { video ->
-                        WebStreamCard(
-                            video = video,
-                            onCast = { onCastVideo(video.url, video.title) }
-                        )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(extractedVideos, key = { it.url }) { video ->
+                            WebStreamCard(
+                                video = video,
+                                onCast = { onCastVideo(video.url, video.title) }
+                            )
+                        }
                     }
                 }
             }
-        } else {
-            // DEVICE VIDEOS
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                item {
-                    // Prominent "+ Pick Video from Device" Button
-                    OutlinedCard(
-                        onClick = onPickVideo,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                        colors = CardDefaults.outlinedCardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
+            1 -> {
+                // DEVICE VIDEOS
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        OutlinedCard(
+                            onClick = onPickVideo,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                            colors = CardDefaults.outlinedCardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "Pick Video from Device",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Pick Video from Device",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+
+                    if (allDeviceVideos.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.size(56.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "No device videos selected",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "Pick MP4, MKV, or WebM files from device storage to stream directly to TV.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(allDeviceVideos, key = { it.uri.toString() }) { item ->
+                            DeviceVideoCard(
+                                item = item,
+                                onCast = {
+                                    val mime = context.contentResolver.getType(item.uri) ?: "video/mp4"
+                                    val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+                                        uri = item.uri,
+                                        title = item.title,
+                                        mimeType = mime,
+                                        size = item.size,
+                                        receiverIp = CastSessionManager.castingDevice?.ipAddress
+                                    )
+                                    onCastVideo(proxiedUrl, item.title)
+                                }
                             )
                         }
                     }
                 }
-
-                if (allDeviceVideos.isEmpty()) {
+            }
+            2 -> {
+                // MUSIC & AUDIO (OFFLINE AUDIO MODE + OLED BLACK SCREEN ON TV)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     item {
+                        // OLED TV Screen Saver Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (CastSessionManager.isOledBlackScreenEnabled)
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                if (CastSessionManager.isOledBlackScreenEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = if (CastSessionManager.isOledBlackScreenEnabled) Color.Black else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                                            modifier = Modifier.size(26.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text(if (CastSessionManager.isOledBlackScreenEnabled) "📺" else "💡", fontSize = 13.sp)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            "OLED TV Black Screen",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        "When casting audio, the TV receiver screen displays pure pitch-black (#000000) to protect OLED panels from burn-in and minimize energy usage.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Switch(
+                                    checked = CastSessionManager.isOledBlackScreenEnabled,
+                                    onCheckedChange = { CastSessionManager.toggleOledBlackScreen(it) }
+                                )
+                            }
+                        }
+                    }
+
+                    item {
+                        // Pick Audio button & Clear button
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedCard(
+                                onClick = onPickAudio,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.weight(1f),
+                                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
+                                colors = CardDefaults.outlinedCardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.15f)
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = MusicIcon,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Pick Audio Tracks",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
+                            }
+
+                            if (pickedAudios.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = onClearAudios,
+                                    shape = RoundedCornerShape(14.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Clear",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (pickedAudios.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.size(56.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = MusicIcon,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "No music or audio loaded",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "Pick MP3, AAC, FLAC, or WAV files from storage to play and cast with OLED black screen protection.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(pickedAudios, key = { it.uri.toString() }) { item ->
+                            val isPlaying = CastSessionManager.activeMediaTitle == item.title && CastSessionManager.activeMediaType == "audio"
+                            DeviceAudioCard(
+                                item = item,
+                                isCurrentPlaying = isPlaying,
+                                onCast = { onCastAudio(item) },
+                                onQueue = {
+                                    val mime = context.contentResolver.getType(item.uri) ?: "audio/mpeg"
+                                    val proxiedUrl = LocalMediaProxy.registerLocalMedia(
+                                        uri = item.uri,
+                                        title = item.title,
+                                        mimeType = mime,
+                                        size = item.size,
+                                        receiverIp = CastSessionManager.castingDevice?.ipAddress
+                                    )
+                                    CastSessionManager.addToQueue(ExtractedVideo(proxiedUrl, item.title))
+                                    Toast.makeText(context, "Added '${item.title}' to queue", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            3 -> {
+                // PHOTOS & SLIDESHOW
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    // Action buttons: Pick Photos, Pick Folder, Clear
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = onPickPhotos,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(PhotoIcon, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Pick Photos", fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = onPickFolder,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("📁 Folder", fontWeight = FontWeight.Bold)
+                        }
+                        if (photoSlideshowList.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = onClearPhotos,
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Clear", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (photoSlideshowList.isEmpty()) {
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 32.dp),
+                                .fillMaxSize()
+                                .padding(24.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Column(
@@ -3130,7 +3634,7 @@ private fun StreamsPage(
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            imageVector = Icons.Default.PlayArrow,
+                                            imageVector = PhotoIcon,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                             modifier = Modifier.size(28.dp)
@@ -3138,35 +3642,142 @@ private fun StreamsPage(
                                     }
                                 }
                                 Text(
-                                    "No device videos selected",
+                                    "No photos selected",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    "Pick MP4, MKV, or WebM files from device storage to stream directly to TV.",
+                                    "Select multiple photos or an entire folder to cast high-resolution photo slideshows with automated transition timers to your TV.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center
                                 )
                             }
                         }
-                    }
-                } else {
-                    items(allDeviceVideos, key = { it.uri.toString() }) { item ->
-                        DeviceVideoCard(
-                            item = item,
-                            onCast = {
-                                val mime = context.contentResolver.getType(item.uri) ?: "video/mp4"
-                                val proxiedUrl = LocalMediaProxy.registerLocalMedia(
-                                    uri = item.uri,
-                                    title = item.title,
-                                    mimeType = mime,
-                                    size = item.size,
-                                    receiverIp = CastSessionManager.castingDevice?.ipAddress
-                                )
-                                onCastVideo(proxiedUrl, item.title)
+                    } else {
+                        // Slideshow Controls Card
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        IconButton(
+                                            onClick = {
+                                                CastSessionManager.isSlideshowPlaying = !CastSessionManager.isSlideshowPlaying
+                                            }
+                                        ) {
+                                            Icon(
+                                                imageVector = if (CastSessionManager.isSlideshowPlaying) PauseIcon else Icons.Default.PlayArrow,
+                                                contentDescription = "Play/Pause Slideshow",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                if (photoSlideshowList.isNotEmpty()) {
+                                                    val prevIdx = if (CastSessionManager.currentPhotoIndex > 0) CastSessionManager.currentPhotoIndex - 1 else photoSlideshowList.size - 1
+                                                    CastSessionManager.currentPhotoIndex = prevIdx
+                                                    onCastPhoto(photoSlideshowList[prevIdx])
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous", modifier = Modifier.size(18.dp))
+                                        }
+                                        IconButton(
+                                            onClick = {
+                                                if (photoSlideshowList.isNotEmpty()) {
+                                                    val nextIdx = (CastSessionManager.currentPhotoIndex + 1) % photoSlideshowList.size
+                                                    CastSessionManager.currentPhotoIndex = nextIdx
+                                                    onCastPhoto(photoSlideshowList[nextIdx])
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Next", modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "Photo ${CastSessionManager.currentPhotoIndex + 1} of ${photoSlideshowList.size}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (CastSessionManager.isSlideshowPlaying) {
+                                            Text(
+                                                text = "Playing (${CastSessionManager.slideshowIntervalSeconds}s delay)",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Interval Chip Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Timer:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    listOf(3, 5, 10, 15, 30).forEach { sec ->
+                                        val isSelected = CastSessionManager.slideshowIntervalSeconds == sec
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                                            border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                                            modifier = Modifier.clickable {
+                                                CastSessionManager.slideshowIntervalSeconds = sec
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "${sec}s",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Photos Grid
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 100.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(bottom = 16.dp)
+                        ) {
+                            items(photoSlideshowList.size, key = { idx -> photoSlideshowList[idx].uri.toString() }) { idx ->
+                                val photo = photoSlideshowList[idx]
+                                val isCurrent = idx == CastSessionManager.currentPhotoIndex
+                                PhotoThumbnailCard(
+                                    photo = photo,
+                                    isSelected = isCurrent,
+                                    onClick = {
+                                        CastSessionManager.currentPhotoIndex = idx
+                                        onCastPhoto(photo)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -3568,6 +4179,221 @@ private fun DeviceVideoCard(
                         imageVector = Icons.Default.Share,
                         contentDescription = "Share",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceAudioCard(
+    item: DeviceAudioItem,
+    isCurrentPlaying: Boolean,
+    onCast: () -> Unit,
+    onQueue: () -> Unit
+) {
+    val context = LocalContext.current
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isCurrentPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+        ),
+        border = BorderStroke(
+            1.dp,
+            if (isCurrentPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = MusicIcon,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "${item.artist} • ${item.album}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (item.durationMs > 0) {
+                            Text(
+                                text = MediaHubManager.formatDuration(item.durationMs),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        if (item.size > 0) {
+                            Text(
+                                text = "• ${MediaHubManager.formatFileSize(item.size)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onCast,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isCurrentPlaying && CastSessionManager.isMediaPlaying) PauseIcon else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(if (isCurrentPlaying) "Casting" else "Cast to TV", fontWeight = FontWeight.Bold)
+                }
+
+                OutlinedButton(
+                    onClick = onQueue,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Queue")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(item.uri, "audio/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(playIntent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No audio player installed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Play")
+                }
+
+                IconButton(
+                    onClick = {
+                        try {
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "audio/*"
+                                putExtra(Intent.EXTRA_STREAM, item.uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share Audio"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Cannot share audio", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Share",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhotoThumbnailCard(
+    photo: DevicePhotoItem,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    var thumbnailBitmap by remember(photo.uri) { mutableStateOf<ImageBitmap?>(null) }
+
+    LaunchedEffect(photo.uri) {
+        thumbnailBitmap = MediaHubManager.loadThumbnail(context, photo.uri)
+    }
+
+    Surface(
+        modifier = Modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary)
+                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (thumbnailBitmap != null) {
+                Image(
+                    bitmap = thumbnailBitmap!!,
+                    contentDescription = photo.title,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = PhotoIcon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            if (isSelected) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Selected",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .size(14.dp)
                     )
                 }
             }
