@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -371,8 +372,12 @@ object SpeedDialManager {
 
     fun saveShortcut(context: Context, item: SpeedDialItem) {
         val current = loadShortcuts(context).toMutableList()
-        current.removeAll { it.id == item.id }
-        current.add(item)
+        val index = current.indexOfFirst { it.id == item.id }
+        if (index >= 0) {
+            current[index] = item
+        } else {
+            current.add(item)
+        }
         saveList(context, current)
     }
 
@@ -421,9 +426,9 @@ fun ChocolateBottomBar(
         contentAlignment = Alignment.Center
     ) {
         val containerColor = when {
-            isAmoled -> Color(0xFF101012)
-            isDark -> MaterialTheme.colorScheme.surfaceContainer
-            else -> MaterialTheme.colorScheme.surfaceContainer
+            isAmoled -> Color(0xFF101012).copy(alpha = 0.94f)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
+            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
         }
         val borderColor = if (isAmoled) Color(0xFF26262B)
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -592,9 +597,9 @@ fun FloatingGlassmorphicBottomBar(
         contentAlignment = Alignment.Center
     ) {
         val containerColor = when {
-            isAmoled -> Color(0xFF101012)
-            isDark -> MaterialTheme.colorScheme.surfaceContainer
-            else -> MaterialTheme.colorScheme.surfaceContainer
+            isAmoled -> Color(0xFF101012).copy(alpha = 0.94f)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
+            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.94f)
         }
         val borderColor = if (isAmoled) Color(0xFF26262B)
             else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
@@ -735,6 +740,7 @@ fun SpeedDialHomeScreen(
     val context = LocalContext.current
     var shortcuts by remember { mutableStateOf(SpeedDialManager.loadShortcuts(context)) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var itemToEdit by remember { mutableStateOf<SpeedDialItem?>(null) }
     var itemToDelete by remember { mutableStateOf<SpeedDialItem?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
@@ -953,22 +959,22 @@ fun SpeedDialHomeScreen(
                                 )
                             }
 
-                            // Long press delete or remove button for custom shortcuts
-                            if (!item.isDefault && !isAddTile) {
+                            // Edit button for all speed dial shortcuts (including pre-added)
+                            if (!isAddTile) {
                                 Surface(
                                     shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
                                     modifier = Modifier
-                                        .size(18.dp)
+                                        .size(20.dp)
                                         .align(Alignment.TopEnd)
-                                        .clickable { itemToDelete = item }
+                                        .clickable { itemToEdit = item }
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Remove",
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit Shortcut",
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(12.dp)
+                                            modifier = Modifier.size(11.dp)
                                         )
                                     }
                                 }
@@ -1043,6 +1049,24 @@ fun SpeedDialHomeScreen(
                     SpeedDialManager.saveShortcut(context, newItem)
                     shortcuts = SpeedDialManager.loadShortcuts(context)
                     showAddDialog = false
+                }
+            )
+        }
+
+        // Edit Shortcut Dialog
+        if (itemToEdit != null) {
+            EditShortcutDialog(
+                item = itemToEdit!!,
+                onDismiss = { itemToEdit = null },
+                onSave = { updated ->
+                    SpeedDialManager.saveShortcut(context, updated)
+                    shortcuts = SpeedDialManager.loadShortcuts(context)
+                    itemToEdit = null
+                },
+                onDelete = { toDelete ->
+                    SpeedDialManager.deleteShortcut(context, toDelete.id)
+                    shortcuts = SpeedDialManager.loadShortcuts(context)
+                    itemToEdit = null
                 }
             )
         }
@@ -1164,6 +1188,101 @@ fun AddShortcutDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Cancel")
+            }
+        }
+    )
+}
+
+/**
+ * Dialog to edit or remove any speed dial shortcut (including pre-added presets)
+ */
+@Composable
+fun EditShortcutDialog(
+    item: SpeedDialItem,
+    onDismiss: () -> Unit,
+    onSave: (SpeedDialItem) -> Unit,
+    onDelete: (SpeedDialItem) -> Unit
+) {
+    var title by remember { mutableStateOf(item.title) }
+    var url by remember { mutableStateOf(item.url) }
+    var emoji by remember { mutableStateOf(item.iconEmoji) }
+    val emojiOptions = listOf("▶️", "🟣", "🤖", "🎬", "🎵", "🏛️", "⭐", "📺", "🎮", "📻", "⚡", "🌐", "🍿")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        title = { Text("Edit Shortcut", fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    text = "Select Icon:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState())
+                ) {
+                    emojiOptions.forEach { opt ->
+                        Surface(
+                            shape = CircleShape,
+                            color = if (emoji == opt) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = if (emoji == opt) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable { emoji = opt }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(opt, fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank() && url.isNotBlank()) {
+                        val finalUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                            "https://$url"
+                        } else url
+                        val updated = item.copy(
+                            title = title.trim(),
+                            url = finalUrl.trim(),
+                            iconEmoji = emoji
+                        )
+                        onSave(updated)
+                    }
+                },
+                enabled = title.isNotBlank() && url.isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { onDelete(item) }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
             }
         }
     )

@@ -92,7 +92,7 @@ fun SettingsScreen(
 
     var isAdBlockEnabled by remember { mutableStateOf(prefs.getBoolean("adblock_enabled", true)) }
     var isPopupsEnabled by remember { mutableStateOf(prefs.getBoolean("popups_enabled", false)) }
-    var isDesktopDefault by remember { mutableStateOf(prefs.getBoolean("desktop_mode", false)) }
+    var isOledTvBlackScreen by remember { mutableStateOf(prefs.getBoolean("oled_tv_black_screen", true)) }
     var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", true)) }
     var isTabBarEnabled by remember { mutableStateOf(prefs.getBoolean("show_tab_bar", true)) }
     var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
@@ -100,6 +100,7 @@ fun SettingsScreen(
     var showCreditsDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
     var showClearSessionDialog by remember { mutableStateOf(false) }
+    var showCustomColorDialog by remember { mutableStateOf(false) }
     var isUpdatingAdblock by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -216,7 +217,7 @@ fun SettingsScreen(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
-                // Accent Color Selector
+                // Accent Color Selector (Unified: Dynamic first, Presets, Custom last)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -229,53 +230,6 @@ fun SettingsScreen(
                         fontWeight = FontWeight.SemiBold
                     )
 
-                    // Dynamic Color (Material You) Toggle on Android 12+
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { onDynamicColorChange(!isDynamicColor) }
-                                .background(
-                                    if (isDynamicColor) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh
-                                )
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = AppIcons.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Dynamic Accent (Material You)",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    "Match system wallpaper palette",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = isDynamicColor,
-                                onCheckedChange = onDynamicColorChange
-                            )
-                        }
-                    }
-
-                    // Accent Palette Swatches
-                    Text(
-                        text = if (isDynamicColor) "Preset Palettes (Overrides Dynamic):" else "Select Preset Accent:",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -284,15 +238,37 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ACCENT_OPTIONS.forEach { opt ->
-                            val isChosen = !isDynamicColor && (currentAccent.equals(opt.key, ignoreCase = true) || (opt.key == "default" && currentAccent.isBlank()))
+                            val isChosen = when {
+                                opt.isDynamic -> isDynamicColor || currentAccent.equals("dynamic", ignoreCase = true)
+                                opt.isCustom -> !isDynamicColor && (currentAccent.startsWith("#") || currentAccent.equals("custom", ignoreCase = true))
+                                else -> !isDynamicColor && !currentAccent.startsWith("#") && !currentAccent.equals("custom", ignoreCase = true) &&
+                                        (currentAccent.equals(opt.key, ignoreCase = true) || (opt.key == "default" && currentAccent.isBlank()))
+                            }
+
+                            val swatchColor = when {
+                                opt.isCustom && currentAccent.startsWith("#") -> parseHexColor(currentAccent)
+                                else -> opt.previewColor
+                            }
+
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = if (isChosen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                                 border = if (isChosen) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                                 modifier = Modifier
                                     .clickable {
-                                        onDynamicColorChange(false)
-                                        onAccentChange(opt.key)
+                                        when {
+                                            opt.isDynamic -> {
+                                                onDynamicColorChange(true)
+                                                onAccentChange("dynamic")
+                                            }
+                                            opt.isCustom -> {
+                                                showCustomColorDialog = true
+                                            }
+                                            else -> {
+                                                onDynamicColorChange(false)
+                                                onAccentChange(opt.key)
+                                            }
+                                        }
                                     }
                             ) {
                                 Row(
@@ -300,24 +276,41 @@ fun SettingsScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clip(CircleShape)
-                                            .background(opt.previewColor),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isChosen) {
+                                    if (opt.isDynamic) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary),
+                                            contentAlignment = Alignment.Center
+                                        ) {
                                             Icon(
-                                                imageVector = Icons.Default.Check,
+                                                imageVector = AppIcons.AutoAwesome,
                                                 contentDescription = null,
-                                                tint = Color.White,
-                                                modifier = Modifier.size(14.dp)
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(13.dp)
                                             )
+                                        }
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .background(swatchColor),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isChosen) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
                                         }
                                     }
                                     Text(
-                                        text = opt.name,
+                                        text = if (opt.isCustom && currentAccent.startsWith("#")) currentAccent else opt.name,
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = if (isChosen) FontWeight.Bold else FontWeight.Normal,
                                         color = if (isChosen) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
@@ -344,19 +337,6 @@ fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
 
                 SettingsToggleItem(
-                    title = "Desktop Site",
-                    subtitle = "Request desktop version",
-                    icon = Icons.Default.Settings,
-                    checked = isDesktopDefault,
-                    onCheckedChange = {
-                        isDesktopDefault = it
-                        prefs.edit().putBoolean("desktop_mode", it).apply()
-                    }
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
-
-                SettingsToggleItem(
                     title = "Bottom Address Bar",
                     subtitle = "Controls at bottom",
                     icon = Icons.Default.Settings,
@@ -364,6 +344,20 @@ fun SettingsScreen(
                     onCheckedChange = {
                         isBottomBarEnabled = it
                         prefs.edit().putBoolean("bottom_address_bar", it).apply()
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
+                SettingsToggleItem(
+                    title = "OLED TV Black Screen",
+                    subtitle = "Protect TV OLED panels during audio casting",
+                    icon = AppIcons.Tv,
+                    checked = isOledTvBlackScreen,
+                    onCheckedChange = {
+                        isOledTvBlackScreen = it
+                        prefs.edit().putBoolean("oled_tv_black_screen", it).apply()
+                        CastSessionManager.toggleOledBlackScreen(it)
                     }
                 )
             }
@@ -451,7 +445,7 @@ fun SettingsScreen(
 
                 SettingsActionItem(
                     title = "Version",
-                    subtitle = "1.14.1 (Material 2026 Expressive)",
+                    subtitle = "1.15.2 (Material 2026 Expressive)",
                     icon = Icons.Default.Settings,
                     onClick = {}
                 )
@@ -460,7 +454,7 @@ fun SettingsScreen(
             // 4. Danger Zone Section
             SettingsSection(title = "Danger Zone") {
                 SettingsActionItem(
-                    title = "Panic Wipe Session",
+                    title = "Clear Session & Exit",
                     subtitle = "Clear cookies, tabs & active casts",
                     icon = Icons.Default.Settings,
                     onClick = { showClearSessionDialog = true }
@@ -550,6 +544,122 @@ fun SettingsScreen(
             shape = RoundedCornerShape(24.dp)
         )
     }
+
+    if (showCustomColorDialog) {
+        CustomColorDialog(
+            initialColorHex = if (currentAccent.startsWith("#")) currentAccent else "#6366F1",
+            onDismiss = { showCustomColorDialog = false },
+            onColorSelected = { chosenHex ->
+                showCustomColorDialog = false
+                onDynamicColorChange(false)
+                onAccentChange(chosenHex)
+            }
+        )
+    }
+}
+
+@Composable
+fun CustomColorDialog(
+    initialColorHex: String,
+    onDismiss: () -> Unit,
+    onColorSelected: (String) -> Unit
+) {
+    var hexInput by remember { mutableStateOf(initialColorHex.removePrefix("#")) }
+    val colorPresets = listOf(
+        "#EF4444", "#F97316", "#F59E0B", "#10B981", "#14B8A6",
+        "#06B6D4", "#3B82F6", "#6366F1", "#8B5CF6", "#D946EF",
+        "#EC4899", "#F43F5E", "#84CC16", "#0EA5E9", "#64748B"
+    )
+
+    val previewColor = remember(hexInput) {
+        parseHexColor(hexInput, Color(0xFF6366F1))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Text("Custom Accent Color", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = previewColor,
+                        border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.size(44.dp)
+                    ) {}
+                    OutlinedTextField(
+                        value = hexInput,
+                        onValueChange = { input ->
+                            val filtered = input.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }.take(6)
+                            hexInput = filtered
+                        },
+                        prefix = { Text("#") },
+                        label = { Text("HEX Code") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Text(
+                    text = "Preset Swatches:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                val rows = colorPresets.chunked(5)
+                rows.forEach { rowSwatches ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        rowSwatches.forEach { hex ->
+                            val color = parseHexColor(hex)
+                            val isSelected = hexInput.equals(hex.removePrefix("#"), ignoreCase = true)
+                            Surface(
+                                shape = CircleShape,
+                                color = color,
+                                border = if (isSelected) BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary) else BorderStroke(0.5.dp, Color.Gray.copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clickable { hexInput = hex.removePrefix("#") }
+                            ) {
+                                if (isSelected) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (hexInput.isNotBlank()) {
+                        onColorSelected("#${hexInput.uppercase()}")
+                    }
+                },
+                enabled = hexInput.length >= 3
+            ) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

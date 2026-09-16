@@ -935,6 +935,9 @@ class MainActivity : ComponentActivity() {
         val isAmoled = themeMode == "oled" || themeMode == "amoled"
         val isDark = themeMode != "light"
         val prefs = remember { EncryptedStorage.getPreferences(context) }
+        LaunchedEffect(Unit) {
+            CastSessionManager.isOledBlackScreenEnabled = prefs.getBoolean("oled_tv_black_screen", true)
+        }
         val isBottomAddressBar = remember { prefs.getBoolean("bottom_address_bar", true) }
         val showTabBar = remember { prefs.getBoolean("show_tab_bar", true) }
         var mediaHubSubTab by rememberSaveable { mutableStateOf(0) }
@@ -1011,6 +1014,24 @@ class MainActivity : ComponentActivity() {
                     pickedVideos.add(0, DeviceVideoItem(uri = uri, title = name, size = size, isDownload = false))
                 }
                 Toast.makeText(context, "Selected: $name", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val pickVideoFolderLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocumentTree()
+        ) { treeUri: Uri? ->
+            if (treeUri != null) {
+                lifecycleScope.launch {
+                    val videos = MediaHubManager.loadVideosFromFolder(context, treeUri)
+                    var addedCount = 0
+                    videos.forEach { video ->
+                        if (pickedVideos.none { it.uri == video.uri }) {
+                            pickedVideos.add(video)
+                            addedCount++
+                        }
+                    }
+                    Toast.makeText(context, "Loaded $addedCount video(s) from folder", Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
@@ -2153,10 +2174,7 @@ class MainActivity : ComponentActivity() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(
-                        top = topPad,
-                        bottom = paddingValues.calculateBottomPadding()
-                    )
+                    .padding(top = topPad)
                     .background(if (isAmoled) Color.Black else MaterialTheme.colorScheme.background)
             ) {
                 Box(
@@ -2424,6 +2442,8 @@ class MainActivity : ComponentActivity() {
                         pickedAudios = pickedAudios,
                         photoSlideshowList = CastSessionManager.photoSlideshowList,
                         onPickVideo = { pickVideoLauncher.launch("video/*") },
+                        onPickVideoFolder = { pickVideoFolderLauncher.launch(null) },
+                        onClearVideos = { pickedVideos.clear() },
                         onPickAudio = { pickAudiosLauncher.launch("audio/*") },
                         onPickAudioFolder = { pickAudioFolderLauncher.launch(null) },
                         onScanDeviceAudio = {
@@ -3401,12 +3421,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-data class DeviceVideoItem(
-    val uri: Uri,
-    val title: String,
-    val size: Long,
-    val isDownload: Boolean = false
-)
 
 private fun getLocalVideoInfo(context: Context, uri: Uri): Pair<String, Long> {
     var name = "video.mp4"
@@ -3435,6 +3449,8 @@ private fun MediaHubPage(
     pickedAudios: List<DeviceAudioItem>,
     photoSlideshowList: List<DevicePhotoItem>,
     onPickVideo: () -> Unit,
+    onPickVideoFolder: () -> Unit = {},
+    onClearVideos: () -> Unit = {},
     onPickAudio: () -> Unit,
     onPickAudioFolder: () -> Unit = {},
     onScanDeviceAudio: () -> Unit = {},
@@ -3621,34 +3637,40 @@ private fun MediaHubPage(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
-                        OutlinedCard(
-                            onClick = onPickVideo,
-                            shape = RoundedCornerShape(16.dp),
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                            colors = CardDefaults.outlinedCardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-                            )
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                            Button(
+                                onClick = onPickVideo,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "Pick Video from Device",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Pick Videos", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            }
+                            OutlinedButton(
+                                onClick = onPickVideoFolder,
+                                modifier = Modifier.weight(1f).height(40.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Icon(AppIcons.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Select Folder", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                            }
+                            if (allDeviceVideos.isNotEmpty()) {
+                                OutlinedButton(
+                                    onClick = onClearVideos,
+                                    modifier = Modifier.height(40.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Clear", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                                }
                             }
                         }
                     }
@@ -3721,69 +3743,6 @@ private fun MediaHubPage(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp + bottomPadding),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    item {
-                        // OLED TV Screen Saver Card
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (CastSessionManager.isOledBlackScreenEnabled)
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                            ),
-                            border = BorderStroke(
-                                1.dp,
-                                if (CastSessionManager.isOledBlackScreenEnabled) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                            )
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = if (CastSessionManager.isOledBlackScreenEnabled) Color.Black else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-                                            modifier = Modifier.size(26.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = if (CastSessionManager.isOledBlackScreenEnabled) AppIcons.Tv else AppIcons.Lightbulb,
-                                                    contentDescription = null,
-                                                    tint = if (CastSessionManager.isOledBlackScreenEnabled) Color.White else MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(14.dp)
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            "OLED TV Black Screen",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        "When casting audio, the TV receiver screen displays pure pitch-black (#000000) to protect OLED panels from burn-in and minimize energy usage.",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Switch(
-                                    checked = CastSessionManager.isOledBlackScreenEnabled,
-                                    onCheckedChange = { CastSessionManager.toggleOledBlackScreen(it) }
-                                )
-                            }
-                        }
-                    }
-
                     item {
                         // Action row: Folder, Scan, Filter, Files, Clear
                         Row(
@@ -4013,27 +3972,30 @@ private fun MediaHubPage(
                     ) {
                         Button(
                             onClick = onPickPhotos,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
                             Icon(PhotoIcon, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Pick Photos", fontWeight = FontWeight.Bold)
+                            Text("Pick Photos", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                         OutlinedButton(
                             onClick = onPickFolder,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.weight(1f).height(40.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                         ) {
                             Icon(AppIcons.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Folder", fontWeight = FontWeight.Bold)
+                            Text("Select Folder", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                         if (photoSlideshowList.isNotEmpty()) {
                             OutlinedButton(
                                 onClick = onClearPhotos,
+                                modifier = Modifier.height(40.dp),
                                 shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp)
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                             ) {
                                 Icon(Icons.Default.Delete, contentDescription = "Clear", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                             }
@@ -4409,39 +4371,25 @@ private fun WebStreamCard(
                                 onCast()
                             }
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(38.dp),
                         enabled = !video.isDrmProtected,
                         colors = if (video.isDrmProtected) ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = MaterialTheme.colorScheme.onSurfaceVariant
                         ) else ButtonDefaults.buttonColors(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                     ) {
                         Icon(
-                            imageVector = if (video.isDrmProtected) LockIcon else Icons.Default.PlayArrow,
+                            imageVector = if (video.isDrmProtected) LockIcon else CastIcon,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (video.isDrmProtected) "DRM Locked" else "Cast", fontWeight = FontWeight.Bold)
+                        Text(if (video.isDrmProtected) "DRM Locked" else "Cast", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
 
-                    OutlinedButton(
-                        onClick = {
-                            if (video.isDrmProtected) {
-                                Toast.makeText(context, "Cannot queue DRM-protected stream", Toast.LENGTH_SHORT).show()
-                            } else {
-                                CastSessionManager.addToQueue(video)
-                                Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        enabled = !video.isDrmProtected,
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Text("Queue")
-                    }
-
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = {
                             val mime = when {
                                 video.url.contains(".m3u8") -> "application/x-mpegURL"
@@ -4461,15 +4409,37 @@ private fun WebStreamCard(
                                 Toast.makeText(context, "No compatible player found", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.height(38.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                     ) {
-                        Text("Play")
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Play", fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            if (video.isDrmProtected) {
+                                Toast.makeText(context, "Cannot queue DRM-protected stream", Toast.LENGTH_SHORT).show()
+                            } else {
+                                CastSessionManager.addToQueue(video)
+                                Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        enabled = !video.isDrmProtected,
+                        modifier = Modifier.height(38.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                    ) {
+                        Text("Queue", maxLines = 1, softWrap = false)
                     }
 
                     IconButton(
                         onClick = {
                             DownloadHelper.enqueueDownload(context, video.url, cleanTitle)
-                        }
+                        },
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
                             imageVector = DownloadIcon,
@@ -4486,7 +4456,8 @@ private fun WebStreamCard(
                                 type = "text/plain"
                             }
                             context.startActivity(Intent.createChooser(sendIntent, "Share Stream URL"))
-                        }
+                        },
+                        modifier = Modifier.size(38.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Share,
@@ -4589,16 +4560,38 @@ private fun DeviceVideoCard(
             ) {
                 Button(
                     onClick = onCast,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
+                        imageVector = CastIcon,
                         contentDescription = null,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Cast to TV", fontWeight = FontWeight.Bold)
+                    Text("Cast to TV", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                }
+
+                FilledTonalButton(
+                    onClick = {
+                        try {
+                            val playIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(item.uri, "video/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            context.startActivity(playIntent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "No video player installed", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Play", fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                 }
 
                 OutlinedButton(
@@ -4614,26 +4607,11 @@ private fun DeviceVideoCard(
                         CastSessionManager.addToQueue(ExtractedVideo(proxiedUrl, item.title))
                         Toast.makeText(context, "Added to queue (${CastSessionManager.mediaQueue.size})", Toast.LENGTH_SHORT).show()
                     },
-                    shape = RoundedCornerShape(12.dp)
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                 ) {
-                    Text("Queue")
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        try {
-                            val playIntent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(item.uri, "video/*")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(playIntent)
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "No video player installed", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Open")
+                    Text("Queue", maxLines = 1, softWrap = false)
                 }
 
                 IconButton(
@@ -4648,7 +4626,8 @@ private fun DeviceVideoCard(
                         } catch (e: Exception) {
                             Toast.makeText(context, "Cannot share video", Toast.LENGTH_SHORT).show()
                         }
-                    }
+                    },
+                    modifier = Modifier.size(38.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Share,

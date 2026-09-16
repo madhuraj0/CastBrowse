@@ -39,6 +39,13 @@ data class DevicePhotoItem(
     val size: Long = 0L
 )
 
+data class DeviceVideoItem(
+    val uri: Uri,
+    val title: String,
+    val size: Long = 0L,
+    val isDownload: Boolean = false
+)
+
 object MediaHubManager {
     private const val TAG = "MediaHubManager"
 
@@ -459,6 +466,55 @@ object MediaHubManager {
             Log.e(TAG, "Error scanning audio from folder: ${e.message}", e)
         }
         audioList
+    }
+
+    suspend fun loadVideosFromFolder(context: Context, treeUri: Uri): List<DeviceVideoItem> = withContext(Dispatchers.IO) {
+        val videoList = mutableListOf<DeviceVideoItem>()
+        try {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+            } catch (_: Exception) {}
+
+            val docId = DocumentsContract.getTreeDocumentId(treeUri)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE
+            )
+
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+                while (cursor.moveToNext()) {
+                    val mime = if (mimeCol >= 0) cursor.getString(mimeCol) ?: "" else ""
+                    val name = if (nameCol >= 0) cursor.getString(nameCol) ?: "Video" else "Video"
+                    val isVideo = mime.startsWith("video/") ||
+                        name.endsWith(".mp4", ignoreCase = true) ||
+                        name.endsWith(".mkv", ignoreCase = true) ||
+                        name.endsWith(".webm", ignoreCase = true) ||
+                        name.endsWith(".avi", ignoreCase = true) ||
+                        name.endsWith(".mov", ignoreCase = true) ||
+                        name.endsWith(".3gp", ignoreCase = true) ||
+                        name.endsWith(".ts", ignoreCase = true)
+
+                    if (isVideo) {
+                        val fileDocId = cursor.getString(idCol)
+                        val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, fileDocId)
+                        val size = if (sizeCol >= 0) cursor.getLong(sizeCol) else 0L
+                        videoList.add(DeviceVideoItem(uri = fileUri, title = name, size = size, isDownload = false))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error scanning videos from folder: ${e.message}", e)
+        }
+        videoList
     }
 
     suspend fun loadThumbnail(context: Context, uri: Uri): ImageBitmap? = withContext(Dispatchers.IO) {

@@ -15,10 +15,13 @@ import androidx.compose.ui.unit.dp
 data class AccentColorOption(
     val key: String,
     val name: String,
-    val previewColor: Color
+    val previewColor: Color,
+    val isDynamic: Boolean = false,
+    val isCustom: Boolean = false
 )
 
 val ACCENT_OPTIONS = listOf(
+    AccentColorOption("dynamic", "Dynamic", Color(0xFF38BDF8), isDynamic = true),
     AccentColorOption("default", "Slate", Color(0xFF64748B)),
     AccentColorOption("blue", "Blue", Color(0xFF3B82F6)),
     AccentColorOption("indigo", "Indigo", Color(0xFF6366F1)),
@@ -26,7 +29,8 @@ val ACCENT_OPTIONS = listOf(
     AccentColorOption("green", "Green", Color(0xFF22C55E)),
     AccentColorOption("amber", "Amber", Color(0xFFF59E0B)),
     AccentColorOption("rose", "Rose", Color(0xFFF43F5E)),
-    AccentColorOption("purple", "Purple", Color(0xFFA855F7))
+    AccentColorOption("purple", "Purple", Color(0xFFA855F7)),
+    AccentColorOption("custom", "Custom", Color(0xFFEC4899), isCustom = true)
 )
 
 // --- Preset Color Palettes ---
@@ -163,6 +167,29 @@ fun getAccentColorScheme(themeMode: String, accentKey: String): ColorScheme {
     }
 }
 
+fun parseHexColor(hex: String, defaultColor: Color = Color(0xFF6366F1)): Color {
+    return try {
+        val clean = if (hex.startsWith("#")) hex else "#$hex"
+        Color(android.graphics.Color.parseColor(clean))
+    } catch (_: Exception) {
+        defaultColor
+    }
+}
+
+fun getCustomColorScheme(themeMode: String, customColor: Color): ColorScheme {
+    val isLight = themeMode == "light"
+    val isOled = themeMode == "oled" || themeMode == "amoled"
+    val primaryContainer = customColor.copy(alpha = 0.22f)
+    val onPrimaryContainer = if (isLight) customColor else Color.White
+    return if (isLight) {
+        buildLightScheme(customColor, primaryContainer, onPrimaryContainer)
+    } else if (isOled) {
+        buildOledScheme(customColor, primaryContainer, onPrimaryContainer)
+    } else {
+        buildDarkScheme(customColor, primaryContainer, onPrimaryContainer)
+    }
+}
+
 @Composable
 fun CastBrowseTheme(
     themeMode: String = "dark",
@@ -173,25 +200,34 @@ fun CastBrowseTheme(
     val context = LocalContext.current
     val isLight = themeMode == "light"
     val isOled = themeMode == "oled" || themeMode == "amoled"
+    val isDynamicChosen = (dynamicColor || accentColor.equals("dynamic", ignoreCase = true)) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
-    val colorScheme = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        if (isLight) {
-            dynamicLightColorScheme(context)
-        } else if (isOled) {
-            dynamicDarkColorScheme(context).copy(
-                background = Color.Black,
-                surface = Color.Black,
-                surfaceContainer = Color(0xFF101012),
-                surfaceContainerLow = Color(0xFF080808),
-                surfaceContainerHigh = Color(0xFF18181B),
-                outline = Color(0xFF2A2A2E),
-                outlineVariant = Color(0xFF1C1C20)
-            )
-        } else {
-            dynamicDarkColorScheme(context)
+    val colorScheme = when {
+        isDynamicChosen -> {
+            if (isLight) {
+                dynamicLightColorScheme(context)
+            } else if (isOled) {
+                dynamicDarkColorScheme(context).copy(
+                    background = Color.Black,
+                    surface = Color.Black,
+                    surfaceContainer = Color(0xFF101012),
+                    surfaceContainerLow = Color(0xFF080808),
+                    surfaceContainerHigh = Color(0xFF18181B),
+                    outline = Color(0xFF2A2A2E),
+                    outlineVariant = Color(0xFF1C1C20)
+                )
+            } else {
+                dynamicDarkColorScheme(context)
+            }
         }
-    } else {
-        getAccentColorScheme(themeMode, accentColor)
+        accentColor.startsWith("#") || accentColor.startsWith("custom_") -> {
+            val hex = if (accentColor.startsWith("custom_")) accentColor.removePrefix("custom_") else accentColor
+            val custom = parseHexColor(hex)
+            getCustomColorScheme(themeMode, custom)
+        }
+        else -> {
+            getAccentColorScheme(themeMode, accentColor)
+        }
     }
 
     MaterialTheme(
