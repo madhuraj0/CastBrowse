@@ -167,9 +167,9 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         val themeOptions = listOf(
-                            Triple("light", "Light", "☀️"),
-                            Triple("dark", "Dark", "🌙"),
-                            Triple("oled", "OLED Black", "⬛")
+                            Triple("light", "Light", AppIcons.LightMode),
+                            Triple("dark", "Dark", AppIcons.DarkMode),
+                            Triple("oled", "OLED Black", AppIcons.Contrast)
                         )
                         themeOptions.forEach { (mode, label, icon) ->
                             val isSelected = when (mode) {
@@ -195,7 +195,12 @@ fun SettingsScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text(icon, fontSize = 18.sp)
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = label,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                     Text(
                                         text = label,
                                         style = MaterialTheme.typography.labelSmall,
@@ -239,7 +244,12 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text("✨", fontSize = 20.sp)
+                            Icon(
+                                imageVector = AppIcons.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     "Dynamic Accent (Material You)",

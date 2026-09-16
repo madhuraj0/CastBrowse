@@ -504,7 +504,7 @@ fun ChocolateBottomBar(
                                 val contentColor = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
                                 else MaterialTheme.colorScheme.onSurfaceVariant
                                 Icon(
-                                    imageVector = Icons.Default.Home,
+                                    imageVector = AppIcons.Browser,
                                     contentDescription = "Browser",
                                     tint = contentColor,
                                     modifier = Modifier.size(19.dp)
@@ -551,14 +551,14 @@ fun ChocolateBottomBar(
                                     }
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = "Stream",
+                                        imageVector = AppIcons.MediaLibrary,
+                                        contentDescription = "Media Hub",
                                         tint = contentColor,
                                         modifier = Modifier.size(19.dp)
                                     )
                                 }
                                 Text(
-                                    text = "Stream",
+                                    text = "Media",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     color = contentColor
@@ -655,7 +655,7 @@ fun FloatingGlassmorphicBottomBar(
                             val contentColor = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
                             else MaterialTheme.colorScheme.onSurfaceVariant
                             Icon(
-                                imageVector = Icons.Default.Home,
+                                imageVector = AppIcons.Browser,
                                 contentDescription = "Browser",
                                 tint = contentColor,
                                 modifier = Modifier.size(20.dp)
@@ -701,14 +701,14 @@ fun FloatingGlassmorphicBottomBar(
                                 }
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.PlayArrow,
+                                    imageVector = AppIcons.MediaLibrary,
                                     contentDescription = "Media Hub",
                                     tint = contentColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
                             Text(
-                                text = "Media Hub",
+                                text = "Media",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = contentColor
@@ -763,7 +763,12 @@ fun SpeedDialHomeScreen(
                 modifier = Modifier.size(64.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("📡", fontSize = 28.sp)
+                    Icon(
+                        imageVector = AppIcons.Tv,
+                        contentDescription = "CastBrowse",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
             }
 

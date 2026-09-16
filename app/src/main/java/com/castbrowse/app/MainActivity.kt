@@ -62,6 +62,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -498,6 +499,7 @@ class MainActivity : ComponentActivity() {
     // Requested navigation tab from external intents (0 = Browser, 1 = Streams Hub)
     private var requestedNavTab by mutableStateOf<Int?>(null)
     private var pendingCheckClipboardOnFocus = false
+    private var onThemeResumeCallback: (() -> Unit)? = null
 
     data class BrowserTab(val id: Int, val title: String, val url: String)
 
@@ -518,12 +520,22 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val prefs = remember { EncryptedStorage.getPreferences(context) }
-            var themeMode by remember { mutableStateOf(prefs.getString("theme_mode", "dark") ?: "dark") }
-            var dynamicColor by remember { mutableStateOf(prefs.getBoolean("dynamic_color", false)) }
-            var accentColor by remember { mutableStateOf(prefs.getString("accent_color", "default") ?: "default") }
+            var themeMode by remember { mutableStateOf(EncryptedStorage.getPreferences(context).getString("theme_mode", "dark") ?: "dark") }
+            var dynamicColor by remember { mutableStateOf(EncryptedStorage.getPreferences(context).getBoolean("dynamic_color", false)) }
+            var accentColor by remember { mutableStateOf(EncryptedStorage.getPreferences(context).getString("accent_color", "default") ?: "default") }
 
-            DisposableEffect(prefs) {
+            DisposableEffect(Unit) {
+                val refreshTheme = {
+                    val freshPrefs = EncryptedStorage.getPreferences(context)
+                    val tm = freshPrefs.getString("theme_mode", "dark") ?: "dark"
+                    val dc = freshPrefs.getBoolean("dynamic_color", false)
+                    val ac = freshPrefs.getString("accent_color", "default") ?: "default"
+                    if (themeMode != tm) themeMode = tm
+                    if (dynamicColor != dc) dynamicColor = dc
+                    if (accentColor != ac) accentColor = ac
+                }
+                onThemeResumeCallback = refreshTheme
+                val prefs = EncryptedStorage.getPreferences(context)
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
                     when (key) {
                         "theme_mode" -> themeMode = sp.getString("theme_mode", "dark") ?: "dark"
@@ -533,6 +545,7 @@ class MainActivity : ComponentActivity() {
                 }
                 prefs.registerOnSharedPreferenceChangeListener(listener)
                 onDispose {
+                    onThemeResumeCallback = null
                     prefs.unregisterOnSharedPreferenceChangeListener(listener)
                 }
             }
@@ -546,11 +559,16 @@ class MainActivity : ComponentActivity() {
                     themeMode = themeMode,
                     onThemeModeChange = { newMode ->
                         themeMode = newMode
-                        prefs.edit().putString("theme_mode", newMode).apply()
+                        EncryptedStorage.getPreferences(context).edit().putString("theme_mode", newMode).apply()
                     }
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        onThemeResumeCallback?.invoke()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -919,6 +937,8 @@ class MainActivity : ComponentActivity() {
         val prefs = remember { EncryptedStorage.getPreferences(context) }
         val isBottomAddressBar = remember { prefs.getBoolean("bottom_address_bar", true) }
         val showTabBar = remember { prefs.getBoolean("show_tab_bar", true) }
+        var mediaHubSubTab by rememberSaveable { mutableStateOf(0) }
+        var hasVisitedMediaHub by rememberSaveable { mutableStateOf(false) }
 
         val switchTab: (Int) -> Unit = { targetId ->
             if (targetId != activeTabId) {
@@ -1238,7 +1258,7 @@ class MainActivity : ComponentActivity() {
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                     shadowElevation = 1.dp,
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(36.dp)
                         .clickable {
                             val intent = android.content.Intent(context, CastWizardActivity::class.java)
                             context.startActivity(intent)
@@ -1254,22 +1274,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(8.dp))
             }
 
             // Address / search field container with horizontal swipe to switch tabs
             var accumulatedDrag by remember { mutableStateOf(0f) }
             Surface(
-                shape = RoundedCornerShape(19.dp),
+                shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(
                     width = if (addressBarFocused) 1.5.dp else 1.dp,
                     color = if (addressBarFocused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                 ),
-                shadowElevation = if (addressBarFocused) 3.dp else 1.dp,
+                shadowElevation = if (addressBarFocused) 2.dp else 1.dp,
                 modifier = Modifier
                     .weight(1f)
-                    .height(38.dp)
+                    .height(40.dp)
                     .pointerInput(tabs.size, activeTabId) {
                         detectHorizontalDragGestures(
                             onDragStart = { accumulatedDrag = 0f },
@@ -1288,10 +1308,11 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
-                    .padding(horizontal = 16.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val onSurfaceColor = MaterialTheme.colorScheme.onSurface
@@ -1312,7 +1333,10 @@ class MainActivity : ComponentActivity() {
                                         editText.maxLines = 1
                                         editText.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
                                         editText.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
-                                        editText.textSize = 16f
+                                        editText.textSize = 15f
+                                        editText.setPadding(0, 0, 0, 0)
+                                        editText.gravity = android.view.Gravity.CENTER_VERTICAL
+                                        editText.includeFontPadding = false
                                         
                                         // Handle focus changes
                                         editText.setOnFocusChangeListener { _, hasFocus ->
@@ -1377,7 +1401,7 @@ class MainActivity : ComponentActivity() {
                         }
                         
                         if (!addressBarFocused) {
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
  
                             // Chrome-style Tab Counter Button
                             Surface(
@@ -1386,7 +1410,7 @@ class MainActivity : ComponentActivity() {
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 shadowElevation = 1.dp,
                                 modifier = Modifier
-                                    .size(30.dp)
+                                    .size(32.dp)
                                     .clickable { showTabSwitcher = true }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -1874,27 +1898,61 @@ class MainActivity : ComponentActivity() {
                                 )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = "▶ ${activeDevice.name}",
+                                        text = activeDevice.name,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = miniPlayerContentColor.copy(alpha = 0.7f)
+                                        color = miniPlayerContentColor.copy(alpha = 0.8f)
                                     )
                                     if (CastSessionManager.activeMediaType == "audio" && CastSessionManager.isOledBlackScreenEnabled) {
-                                        Text(
-                                            text = "• 📺 OLED Black Screen",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = AppIcons.Tv,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                                Text(
+                                                    text = "OLED Off",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
                                     } else if (CastSessionManager.activeMediaType == "photo") {
-                                        Text(
-                                            text = "• 📸 Slideshow",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.secondary
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = PhotoIcon,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.secondary,
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                                Text(
+                                                    text = "Slideshow",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.secondary
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1952,54 +2010,111 @@ class MainActivity : ComponentActivity() {
                     }
                 } else {
                     Surface(
-                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
                         color = if (isAmoled) Color(0xFF101012) else MaterialTheme.colorScheme.surfaceContainer,
-                        tonalElevation = 3.dp,
-                        shadowElevation = 4.dp,
-                        border = BorderStroke(1.dp, if (isAmoled) Color(0xFF26262B) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        tonalElevation = 2.dp,
+                        shadowElevation = 2.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
                     ) {
-                        TopAppBar(
-                            title = {
-                                Text(
-                                    "Media Hub",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            TopAppBar(
+                                title = {
+                                    Text(
+                                        "Media Hub",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                },
+                                navigationIcon = {
+                                    IconButton(onClick = { currentNavTab = 0 }) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back"
+                                        )
+                                    }
+                                },
+                                actions = {
+                                    val activeDevice = CastSessionManager.castingDevice
+                                    IconButton(onClick = {
+                                        val intent = Intent(context, CastWizardActivity::class.java)
+                                        context.startActivity(intent)
+                                    }) {
+                                        Icon(
+                                            imageVector = CastIcon,
+                                            contentDescription = "Cast Setup",
+                                            tint = if (activeDevice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = Color.Transparent,
+                                    titleContentColor = MaterialTheme.colorScheme.onSurface
                                 )
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { currentNavTab = 0 }) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back"
-                                    )
-                                }
-                            },
-                            actions = {
-                                val activeDevice = CastSessionManager.castingDevice
-                                IconButton(onClick = {
-                                    val intent = Intent(context, CastWizardActivity::class.java)
-                                    context.startActivity(intent)
-                                }) {
-                                    Icon(
-                                        imageVector = CastIcon,
-                                        contentDescription = "Cast Setup",
-                                        tint = if (activeDevice != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = Color.Transparent,
-                                titleContentColor = MaterialTheme.colorScheme.onSurface
                             )
-                        )
+
+                            // Unified Material 3 Primary TabRow for Media Hub
+                            ScrollableTabRow(
+                                selectedTabIndex = mediaHubSubTab,
+                                containerColor = Color.Transparent,
+                                contentColor = MaterialTheme.colorScheme.primary,
+                                edgePadding = 16.dp,
+                                divider = {
+                                    HorizontalDivider(
+                                        thickness = 1.dp,
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                    )
+                                }
+                            ) {
+                                Tab(
+                                    selected = mediaHubSubTab == 0,
+                                    onClick = { mediaHubSubTab = 0 },
+                                    text = {
+                                        Text(
+                                            text = if (extractedVideos.isNotEmpty()) "Web Streams (${extractedVideos.size})" else "Web Streams",
+                                            fontWeight = if (mediaHubSubTab == 0) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                )
+                                Tab(
+                                    selected = mediaHubSubTab == 1,
+                                    onClick = { mediaHubSubTab = 1 },
+                                    text = {
+                                        val devCount = pickedVideos.size + DownloadHelper.getDownloads(context).count { it.status == android.app.DownloadManager.STATUS_SUCCESSFUL && it.localUri != null }
+                                        Text(
+                                            text = if (devCount > 0) "Device Videos ($devCount)" else "Device Videos",
+                                            fontWeight = if (mediaHubSubTab == 1) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                )
+                                Tab(
+                                    selected = mediaHubSubTab == 2,
+                                    onClick = { mediaHubSubTab = 2 },
+                                    text = {
+                                        Text(
+                                            text = if (pickedAudios.isNotEmpty()) "Audio & Music (${pickedAudios.size})" else "Audio & Music",
+                                            fontWeight = if (mediaHubSubTab == 2) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                )
+                                Tab(
+                                    selected = mediaHubSubTab == 3,
+                                    onClick = { mediaHubSubTab = 3 },
+                                    text = {
+                                        val photoCount = CastSessionManager.photoSlideshowList.size
+                                        Text(
+                                            text = if (photoCount > 0) "Photos ($photoCount)" else "Photos",
+                                            fontWeight = if (mediaHubSubTab == 3) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             },
             bottomBar = {
-                Column {
+                Column(modifier = Modifier.background(Color.Transparent)) {
                     miniPlayerStrip()
                     if (isBottomAddressBar) {
                         AnimatedVisibility(
@@ -2285,21 +2400,25 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Dedicated Media Hub Page with Seamless Dissolving Fade Transition
-            AnimatedVisibility(
-                visible = currentNavTab == 1,
-                enter = fadeIn(animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)),
-                exit = fadeOut(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .zIndex(2f)
-            ) {
+            // Dedicated Media Hub Page with State Preservation
+            val isMediaHubVisible = currentNavTab == 1
+            if (isMediaHubVisible) {
+                hasVisitedMediaHub = true
+            }
+
+            if (hasVisitedMediaHub) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
+                        .zIndex(if (isMediaHubVisible) 2f else -1f)
+                        .graphicsLayer {
+                            alpha = if (isMediaHubVisible) 1f else 0f
+                        }
+                        .background(if (isAmoled) Color.Black else MaterialTheme.colorScheme.background)
                 ) {
                     MediaHubPage(
+                        selectedSubTab = mediaHubSubTab,
+                        onSubTabChanged = { mediaHubSubTab = it },
                         extractedVideos = extractedVideos,
                         pickedVideos = pickedVideos,
                         pickedAudios = pickedAudios,
@@ -3309,6 +3428,8 @@ private fun getLocalVideoInfo(context: Context, uri: Uri): Pair<String, Long> {
 
 @Composable
 private fun MediaHubPage(
+    selectedSubTab: Int,
+    onSubTabChanged: (Int) -> Unit,
     extractedVideos: List<ExtractedVideo>,
     pickedVideos: List<DeviceVideoItem>,
     pickedAudios: List<DeviceAudioItem>,
@@ -3336,10 +3457,9 @@ private fun MediaHubPage(
     onSwitchToBrowser: () -> Unit
 ) {
     val context = LocalContext.current
-    var subTab by remember { mutableStateOf(0) } // 0 = Web Streams, 1 = Device Videos, 2 = Audio, 3 = Photos
     var showScanCriteriaDialog by remember { mutableStateOf(false) }
 
-    val downloadedVideos = remember(subTab) {
+    val downloadedVideos = remember(selectedSubTab) {
         DownloadHelper.getDownloads(context).filter {
             it.status == android.app.DownloadManager.STATUS_SUCCESSFUL && it.localUri != null
         }.mapNotNull { dl ->
@@ -3354,63 +3474,6 @@ private fun MediaHubPage(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Media Hub Top Tabs: Web Streams | Device Videos | Audio & Music | Photos & Slideshow
-        Surface(
-            color = Color.Transparent,
-            tonalElevation = 0.dp
-        ) {
-            ScrollableTabRow(
-                selectedTabIndex = subTab,
-                containerColor = Color.Transparent,
-                contentColor = MaterialTheme.colorScheme.primary,
-                edgePadding = 12.dp,
-                divider = {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-                }
-            ) {
-                Tab(
-                    selected = subTab == 0,
-                    onClick = { subTab = 0 },
-                    text = {
-                        Text(
-                            text = if (extractedVideos.isNotEmpty()) "Web Streams (${extractedVideos.size})" else "Web Streams",
-                            fontWeight = if (subTab == 0) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                )
-                Tab(
-                    selected = subTab == 1,
-                    onClick = { subTab = 1 },
-                    text = {
-                        Text(
-                            text = if (allDeviceVideos.isNotEmpty()) "Device Videos (${allDeviceVideos.size})" else "Device Videos",
-                            fontWeight = if (subTab == 1) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                )
-                Tab(
-                    selected = subTab == 2,
-                    onClick = { subTab = 2 },
-                    text = {
-                        Text(
-                            text = if (pickedAudios.isNotEmpty()) "Audio & Music (${pickedAudios.size})" else "Audio & Music",
-                            fontWeight = if (subTab == 2) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                )
-                Tab(
-                    selected = subTab == 3,
-                    onClick = { subTab = 3 },
-                    text = {
-                        Text(
-                            text = if (photoSlideshowList.isNotEmpty()) "Photos (${photoSlideshowList.size})" else "Photos",
-                            fontWeight = if (subTab == 3) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                )
-            }
-        }
-
         // Active Receiver Header Card (if connected or not)
         val activeDevice = CastSessionManager.castingDevice
         Surface(
@@ -3467,7 +3530,7 @@ private fun MediaHubPage(
         }
 
         // SubTab Content: 0 = Web Streams, 1 = Device Videos, 2 = Audio, 3 = Photos
-        when (subTab) {
+        when (selectedSubTab) {
             0 -> {
                 // WEB STREAMS
                 if (extractedVideos.isEmpty()) {
@@ -3690,7 +3753,12 @@ private fun MediaHubPage(
                                             modifier = Modifier.size(26.dp)
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
-                                                Text(if (CastSessionManager.isOledBlackScreenEnabled) "📺" else "💡", fontSize = 13.sp)
+                                                Icon(
+                                                    imageVector = if (CastSessionManager.isOledBlackScreenEnabled) AppIcons.Tv else AppIcons.Lightbulb,
+                                                    contentDescription = null,
+                                                    tint = if (CastSessionManager.isOledBlackScreenEnabled) Color.White else MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
                                             }
                                         }
                                         Spacer(modifier = Modifier.width(8.dp))
@@ -3717,51 +3785,67 @@ private fun MediaHubPage(
                     }
 
                     item {
-                        // Action row: Folder, Scan, Criteria/Filter, Pick Files, Clear
+                        // Action row: Folder, Scan, Filter, Files, Clear
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Button(
+                            FilledTonalButton(
                                 onClick = onPickAudioFolder,
-                                modifier = Modifier.weight(1.1f),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp)
                             ) {
-                                Text("📁 Folder", fontWeight = FontWeight.Bold)
+                                Icon(AppIcons.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Folder", fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                             OutlinedButton(
                                 onClick = onScanDeviceAudio,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp)
                             ) {
-                                Text("🔄 Scan", fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Scan", fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                             OutlinedButton(
                                 onClick = { showScanCriteriaDialog = true },
-                                modifier = Modifier.weight(1.1f),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp)
                             ) {
-                                Text("⚙️ Filter", fontWeight = FontWeight.Bold)
+                                Icon(AppIcons.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Filter", fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                             OutlinedButton(
                                 onClick = onPickAudio,
-                                modifier = Modifier.weight(0.9f),
-                                shape = RoundedCornerShape(12.dp)
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp)
                             ) {
-                                Text("➕ Files", fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Files", fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
                             if (pickedAudios.isNotEmpty()) {
                                 OutlinedButton(
                                     onClick = onClearAudios,
                                     shape = RoundedCornerShape(12.dp),
-                                    contentPadding = PaddingValues(horizontal = 8.dp)
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(36.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Delete,
                                         contentDescription = "Clear",
                                         tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
@@ -3849,26 +3933,35 @@ private fun MediaHubPage(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Button(
+                                        FilledTonalButton(
                                             onClick = onPickAudioFolder,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier.weight(1f).height(40.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            Text("📁 Folder", fontWeight = FontWeight.Bold)
+                                            Icon(AppIcons.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Folder", fontWeight = FontWeight.SemiBold, maxLines = 1)
                                         }
                                         Button(
                                             onClick = onScanDeviceAudio,
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier.weight(1f).height(40.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            Text("🔄 Scan", fontWeight = FontWeight.Bold)
+                                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Scan", fontWeight = FontWeight.SemiBold, maxLines = 1)
                                         }
                                         OutlinedButton(
                                             onClick = { showScanCriteriaDialog = true },
-                                            modifier = Modifier.weight(1f),
+                                            modifier = Modifier.weight(1f).height(40.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
-                                            Text("⚙️ Criteria", fontWeight = FontWeight.Bold)
+                                            Icon(AppIcons.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Criteria", fontWeight = FontWeight.SemiBold, maxLines = 1)
                                         }
                                     }
                                 }
@@ -3932,7 +4025,9 @@ private fun MediaHubPage(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("📁 Folder", fontWeight = FontWeight.Bold)
+                            Icon(AppIcons.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Folder", fontWeight = FontWeight.Bold)
                         }
                         if (photoSlideshowList.isNotEmpty()) {
                             OutlinedButton(
@@ -4707,9 +4802,11 @@ private fun AudioScanCriteriaDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text(
-                                        text = if (isExcluded) "🚫" else "📁",
-                                        fontSize = 16.sp
+                                    Icon(
+                                        imageVector = if (isExcluded) AppIcons.Block else AppIcons.FolderOpen,
+                                        contentDescription = null,
+                                        tint = if (isExcluded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
