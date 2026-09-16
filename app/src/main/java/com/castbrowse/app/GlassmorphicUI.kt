@@ -69,9 +69,9 @@ object GlassmorphicTheme {
         alphaMultiplier: Float = 1.0f
     ): Color {
         return when {
-            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
-            isDark -> Color(0xFF1E1F25).copy(alpha = (0.88f * alphaMultiplier).coerceIn(0f, 1f))
-            else -> Color(0xFFF2F4FA).copy(alpha = (0.90f * alphaMultiplier).coerceIn(0f, 1f))
+            isAmoled -> Color(0xFF101012)
+            isDark -> Color(0xFF1E2028)
+            else -> Color(0xFFEFF1F4)
         }
     }
 
@@ -87,9 +87,9 @@ object GlassmorphicTheme {
         width: Dp = 1.dp
     ): BorderStroke {
         val color = when {
-            isAmoled -> Color.White.copy(alpha = 0.15f)
-            isDark -> Color.White.copy(alpha = 0.12f)
-            else -> Color.Black.copy(alpha = 0.08f)
+            isAmoled -> Color(0xFF26262B)
+            isDark -> Color(0xFF333644)
+            else -> Color(0xFFE2E4EB)
         }
         return BorderStroke(width = width, color = color)
     }
@@ -158,19 +158,18 @@ fun Modifier.frostedGlass(
     isDark: Boolean = true,
     isAmoled: Boolean = false,
     borderWidth: Dp = 1.dp,
-    elevation: Dp = 3.dp,
+    elevation: Dp = 2.dp,
     glowColor: Color? = null,
-    alpha: Float = 0.88f
+    alpha: Float = 1.0f
 ): Modifier = composed {
     val containerColor = when {
-        isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
-        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = alpha)
-        else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = (alpha + 0.04f).coerceAtMost(1f))
+        isAmoled -> Color(0xFF101012)
+        isDark -> MaterialTheme.colorScheme.surfaceContainer
+        else -> MaterialTheme.colorScheme.surfaceContainer
     }
-    val borderColor = glowColor?.copy(alpha = 0.45f)
-        ?: if (isAmoled) Color.White.copy(alpha = 0.15f)
-        else if (isDark) Color.White.copy(alpha = 0.12f)
-        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+    val borderColor = glowColor?.copy(alpha = 0.5f)
+        ?: if (isAmoled) Color(0xFF26262B)
+        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
 
     this
         .shadow(elevation = elevation, shape = shape)
@@ -231,14 +230,13 @@ fun RefractiveGlassSurface(
     content: @Composable BoxScope.() -> Unit
 ) {
     val containerColor = when {
-        isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
-        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
-        else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+        isAmoled -> Color(0xFF101012)
+        isDark -> MaterialTheme.colorScheme.surfaceContainer
+        else -> MaterialTheme.colorScheme.surfaceContainer
     }
-    val borderColor = glowColor?.copy(alpha = 0.45f)
-        ?: if (isAmoled) Color.White.copy(alpha = 0.15f)
-        else if (isDark) Color.White.copy(alpha = 0.12f)
-        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+    val borderColor = glowColor?.copy(alpha = 0.5f)
+        ?: if (isAmoled) Color(0xFF26262B)
+        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
 
     Surface(
         shape = shape,
@@ -423,13 +421,12 @@ fun ChocolateBottomBar(
         contentAlignment = Alignment.Center
     ) {
         val containerColor = when {
-            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
-            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
-            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+            isAmoled -> Color(0xFF101012)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer
+            else -> MaterialTheme.colorScheme.surfaceContainer
         }
-        val borderColor = if (isAmoled) Color.White.copy(alpha = 0.15f)
-            else if (isDark) Color.White.copy(alpha = 0.12f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+        val borderColor = if (isAmoled) Color(0xFF26262B)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = containerColor,
@@ -595,13 +592,12 @@ fun FloatingGlassmorphicBottomBar(
         contentAlignment = Alignment.Center
     ) {
         val containerColor = when {
-            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
-            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
-            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+            isAmoled -> Color(0xFF101012)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer
+            else -> MaterialTheme.colorScheme.surfaceContainer
         }
-        val borderColor = if (isAmoled) Color.White.copy(alpha = 0.15f)
-            else if (isDark) Color.White.copy(alpha = 0.12f)
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+        val borderColor = if (isAmoled) Color(0xFF26262B)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = containerColor,

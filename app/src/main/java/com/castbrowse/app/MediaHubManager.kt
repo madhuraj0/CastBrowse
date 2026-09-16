@@ -28,7 +28,9 @@ data class DeviceAudioItem(
     val album: String = "Unknown Album",
     val durationMs: Long = 0L,
     val size: Long = 0L,
-    val albumId: Long = -1L
+    val albumId: Long = -1L,
+    val folderName: String = "",
+    val path: String = ""
 )
 
 data class DevicePhotoItem(
@@ -225,7 +227,93 @@ object MediaHubManager {
         }
     }
 
-    suspend fun scanDeviceAudio(context: Context): List<DeviceAudioItem> = withContext(Dispatchers.IO) {
+    private const val PREFS_SCAN_CRITERIA = "audio_scan_criteria"
+    const val KEY_EXCLUDED_FOLDERS = "excluded_folders"
+    const val KEY_INCLUDED_FOLDERS = "included_folders"
+    const val KEY_MIN_DURATION_SEC = "min_duration_sec"
+
+    val DEFAULT_EXCLUDED_FOLDERS = setOf(
+        "Ringtones",
+        "Notifications",
+        "Alarms",
+        "Voice Notes",
+        "WhatsApp Audio",
+        "WhatsApp Voice Notes",
+        "Call Recordings",
+        "Recordings"
+    )
+
+    fun getExcludedFolders(context: Context): Set<String> {
+        val sp = context.getSharedPreferences(PREFS_SCAN_CRITERIA, Context.MODE_PRIVATE)
+        return sp.getStringSet(KEY_EXCLUDED_FOLDERS, null) ?: DEFAULT_EXCLUDED_FOLDERS
+    }
+
+    fun setExcludedFolders(context: Context, folders: Set<String>) {
+        context.getSharedPreferences(PREFS_SCAN_CRITERIA, Context.MODE_PRIVATE)
+            .edit().putStringSet(KEY_EXCLUDED_FOLDERS, folders).apply()
+    }
+
+    fun addExcludedFolder(context: Context, folder: String) {
+        val current = getExcludedFolders(context).toMutableSet()
+        current.add(folder)
+        setExcludedFolders(context, current)
+    }
+
+    fun removeExcludedFolder(context: Context, folder: String) {
+        val current = getExcludedFolders(context).toMutableSet()
+        current.remove(folder)
+        setExcludedFolders(context, current)
+    }
+
+    fun getIncludedFolders(context: Context): Set<String> {
+        val sp = context.getSharedPreferences(PREFS_SCAN_CRITERIA, Context.MODE_PRIVATE)
+        return sp.getStringSet(KEY_INCLUDED_FOLDERS, emptySet()) ?: emptySet()
+    }
+
+    fun setIncludedFolders(context: Context, folders: Set<String>) {
+        context.getSharedPreferences(PREFS_SCAN_CRITERIA, Context.MODE_PRIVATE)
+            .edit().putStringSet(KEY_INCLUDED_FOLDERS, folders).apply()
+    }
+
+    fun getMinDurationSec(context: Context): Int {
+        return context.getSharedPreferences(PREFS_SCAN_CRITERIA, Context.MODE_PRIVATE)
+            .getInt(KEY_MIN_DURATION_SEC, 30)
+    }
+
+    fun setMinDurationSec(context: Context, sec: Int) {
+        context.getSharedPreferences(PREFS_SCAN_CRITERIA, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_MIN_DURATION_SEC, sec).apply()
+    }
+
+    suspend fun discoverAudioFolders(context: Context): List<Pair<String, Int>> = withContext(Dispatchers.IO) {
+        val folderCounts = mutableMapOf<String, Int>()
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        }
+        val projection = arrayOf(MediaStore.Audio.Media.DATA)
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'"
+        try {
+            context.contentResolver.query(collection, projection, selection, null, null)?.use { cursor ->
+                val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                while (cursor.moveToNext()) {
+                    val path = if (dataCol >= 0) cursor.getString(dataCol) ?: "" else ""
+                    if (path.isNotBlank()) {
+                        val folder = try { java.io.File(path).parentFile?.name ?: "" } catch (_: Exception) { "" }
+                        if (folder.isNotBlank()) {
+                            folderCounts[folder] = (folderCounts[folder] ?: 0) + 1
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error discovering audio folders: ${e.message}", e)
+        }
+        folderCounts.toList().sortedByDescending { it.second }
+    }
+
+    suspend fun scanDeviceAudio(context: Context, applyCriteria: Boolean = true): List<DeviceAudioItem> = withContext(Dispatchers.IO) {
         val audioList = mutableListOf<DeviceAudioItem>()
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -241,11 +329,16 @@ object MediaHubManager {
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.SIZE,
-            MediaStore.Audio.Media.ALBUM_ID
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DATA
         )
 
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
+
+        val excludedFolders = if (applyCriteria) getExcludedFolders(context) else emptySet()
+        val includedFolders = if (applyCriteria) getIncludedFolders(context) else emptySet()
+        val minDurationMs = if (applyCriteria) getMinDurationSec(context) * 1000L else 0L
 
         try {
             context.contentResolver.query(
@@ -262,6 +355,7 @@ object MediaHubManager {
                 val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                 val albumIdColumn = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
+                val dataColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
@@ -272,6 +366,31 @@ object MediaHubManager {
                     val duration = cursor.getLong(durationColumn)
                     val size = cursor.getLong(sizeColumn)
                     val albumId = if (albumIdColumn >= 0) cursor.getLong(albumIdColumn) else -1L
+                    val path = if (dataColumn >= 0) cursor.getString(dataColumn) ?: "" else ""
+                    val folderName = if (path.isNotBlank()) {
+                        try {
+                            java.io.File(path).parentFile?.name ?: ""
+                        } catch (_: Exception) { "" }
+                    } else ""
+
+                    // Apply criteria filtering
+                    if (applyCriteria) {
+                        if (minDurationMs > 0 && duration > 0 && duration < minDurationMs) {
+                            continue
+                        }
+                        if (includedFolders.isNotEmpty()) {
+                            val matchesInc = includedFolders.any { inc ->
+                                folderName.equals(inc, ignoreCase = true) || path.contains("/$inc/", ignoreCase = true)
+                            }
+                            if (!matchesInc) continue
+                        }
+                        if (excludedFolders.isNotEmpty()) {
+                            val matchesExc = excludedFolders.any { exc ->
+                                folderName.equals(exc, ignoreCase = true) || path.contains("/$exc/", ignoreCase = true)
+                            }
+                            if (matchesExc) continue
+                        }
+                    }
 
                     audioList.add(
                         DeviceAudioItem(
@@ -281,7 +400,9 @@ object MediaHubManager {
                             album = if (album == "<unknown>") "Unknown Album" else album,
                             durationMs = duration,
                             size = size,
-                            albumId = albumId
+                            albumId = albumId,
+                            folderName = folderName,
+                            path = path
                         )
                     )
                 }

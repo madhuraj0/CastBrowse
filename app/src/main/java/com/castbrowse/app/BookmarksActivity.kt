@@ -41,9 +41,10 @@ class BookmarksActivity : ComponentActivity() {
         val prefs = EncryptedStorage.getPreferences(this)
         val themeMode = prefs.getString("theme_mode", "dark") ?: "dark"
         val dynamicColor = prefs.getBoolean("dynamic_color", false)
+        val accentColor = prefs.getString("accent_color", "default") ?: "default"
 
         setContent {
-            CastBrowseTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
+            CastBrowseTheme(themeMode = themeMode, dynamicColor = dynamicColor, accentColor = accentColor) {
                 BookmarksScreen(
                     onBack = { finish() },
                     onNavigateToUrl = { url ->
