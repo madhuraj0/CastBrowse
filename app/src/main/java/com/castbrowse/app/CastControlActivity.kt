@@ -224,28 +224,34 @@ class CastControlActivity : ComponentActivity() {
         }
 
         Scaffold(
-            containerColor = Color.Transparent,
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            "Cast Control Center",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { finish() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    modifier = Modifier.refractiveGlass(
-                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                        elevation = 8.dp
+                Surface(
+                    shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 4.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                "Cast Control Center",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black)
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(onClick = { finish() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        modifier = Modifier.statusBarsPadding()
                     )
-                )
+                }
             }
         ) { paddingValues ->
             if (activeDevice == null) {

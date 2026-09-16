@@ -125,15 +125,15 @@ fun HistoryScreen(
     }
 
     Scaffold(
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .refractiveGlass(
-                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                        elevation = 8.dp
-                    )
+            Surface(
+                shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 3.dp,
+                shadowElevation = 4.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     if (isSearchActive) {
@@ -226,6 +226,7 @@ fun HistoryScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             if (filteredItems.isEmpty()) {
                 Box(
@@ -236,18 +237,19 @@ fun HistoryScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(56.dp)
-                                .refractiveGlass(shape = CircleShape, elevation = 2.dp),
-                            contentAlignment = Alignment.Center
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.size(56.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(28.dp)
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                         Text(
                             text = if (searchQuery.isNotEmpty()) "No matching history" else "No browsing history",
@@ -264,34 +266,35 @@ fun HistoryScreen(
                     // Chrome-like "Clear browsing data..." action card at the very top
                     if (historyItems.isNotEmpty() && !isSearchActive) {
                         item {
-                            Box(
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 2.dp,
+                                shadowElevation = 2.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                                    .refractiveGlass(
-                                        shape = RoundedCornerShape(16.dp),
-                                        elevation = 4.dp,
-                                        glowColor = MaterialTheme.colorScheme.error
-                                    )
                                     .clickable { showClearDialog = true }
-                                    .padding(horizontal = 16.dp, vertical = 14.dp)
                             ) {
                                 Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.error),
-                                        contentAlignment = Alignment.Center
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                        modifier = Modifier.size(36.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Clear",
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(20.dp)
-                                        )
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Clear",
+                                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                     Text(
                                         "Clear browsing data...",
@@ -329,34 +332,37 @@ fun HistoryScreen(
                                 }
                             }
 
-                            Box(
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 1.dp,
+                                shadowElevation = 1.dp,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp, vertical = 4.dp)
-                                    .refractiveGlass(
-                                        shape = RoundedCornerShape(14.dp),
-                                        elevation = 2.dp
-                                    )
                                     .clickable { onNavigateToUrl(item.url) }
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // Circular Initial / Web Indicator
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .refractiveGlass(shape = CircleShape, elevation = 2.dp),
-                                        contentAlignment = Alignment.Center
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(40.dp)
                                     ) {
-                                        Text(
-                                            text = domain.removePrefix("www.").firstOrNull()?.uppercase() ?: "W",
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = domain.removePrefix("www.").firstOrNull()?.uppercase() ?: "W",
+                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
                                     }
 
                                     Spacer(modifier = Modifier.width(14.dp))
@@ -370,41 +376,47 @@ fun HistoryScreen(
                                             overflow = TextOverflow.Ellipsis,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
+
                                         Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = item.url,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                        )
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = domain,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
+                                            )
+                                            Text(
+                                                text = "•",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            )
+                                            Text(
+                                                text = timeText,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                            )
+                                        }
                                     }
 
-                                    Spacer(modifier = Modifier.width(8.dp))
-
-                                    Text(
-                                        text = timeText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                    )
-
-                                    Spacer(modifier = Modifier.width(4.dp))
-
-                                    // Remove individual item button
                                     IconButton(
                                         onClick = {
-                                            val updated = historyItems.filterNot {
+                                            historyItems = historyItems.filterNot {
                                                 it.url == item.url && it.timestamp == item.timestamp
                                             }
-                                            historyItems = updated
-                                            saveHistory(prefs, updated)
+                                            saveHistory(prefs, historyItems)
                                         },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(36.dp)
                                     ) {
                                         Icon(
                                             imageVector = Icons.Default.Close,
                                             contentDescription = "Remove entry",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -415,45 +427,31 @@ fun HistoryScreen(
                 }
             }
         }
-    }
 
-    // Clear confirmation dialog
-    if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = {
-                Text(
-                    "Clear Browsing History?",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Text(
-                    "This will delete all saved browsing history entries from your device.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
+        // Clear History Confirmation Dialog
+        if (showClearDialog) {
+            AlertDialog(
+                onDismissRequest = { showClearDialog = false },
+                title = { Text("Clear Browsing History?") },
+                text = { Text("This will permanently delete all recorded browsing history. This action cannot be undone.") },
+                confirmButton = {
+                    TextButton(onClick = {
                         historyItems = emptyList()
                         saveHistory(prefs, emptyList())
                         showClearDialog = false
+                    }) {
+                        Text("Clear", color = MaterialTheme.colorScheme.error)
                     }
-                ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-            shape = RoundedCornerShape(20.dp),
-            containerColor = Color.Transparent,
-            modifier = Modifier.refractiveGlass(shape = RoundedCornerShape(20.dp), elevation = 12.dp, glowColor = MaterialTheme.colorScheme.error)
-        )
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+                shape = RoundedCornerShape(24.dp),
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            )
+        }
     }
 }
 

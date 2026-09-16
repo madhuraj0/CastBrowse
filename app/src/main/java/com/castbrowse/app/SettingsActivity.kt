@@ -91,18 +91,21 @@ fun SettingsScreen(
     var isUpdatingAdblock by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            Box(
+            Surface(
+                shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
+                color = when {
+                    isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+                    isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
+                    else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+                },
+                tonalElevation = 3.dp,
+                shadowElevation = 4.dp,
+                border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.15f) else if (isDark) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .refractiveGlass(
-                        shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                        isDark = isDark,
-                        isAmoled = isAmoled,
-                        elevation = 8.dp
-                    )
             ) {
                 TopAppBar(
                     title = {
@@ -446,13 +449,7 @@ fun SettingsScreen(
     if (showPrivacyDialog) {
         AlertDialog(
             onDismissRequest = { showPrivacyDialog = false },
-            containerColor = Color.Transparent,
-            modifier = Modifier.refractiveGlass(
-                shape = RoundedCornerShape(24.dp),
-                isDark = isDark,
-                isAmoled = isAmoled,
-                elevation = 20.dp
-            ),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("Privacy", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -475,13 +472,7 @@ fun SettingsScreen(
     if (showCreditsDialog) {
         AlertDialog(
             onDismissRequest = { showCreditsDialog = false },
-            containerColor = Color.Transparent,
-            modifier = Modifier.refractiveGlass(
-                shape = RoundedCornerShape(24.dp),
-                isDark = isDark,
-                isAmoled = isAmoled,
-                elevation = 20.dp
-            ),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("Credits", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -504,14 +495,7 @@ fun SettingsScreen(
     if (showClearSessionDialog) {
         AlertDialog(
             onDismissRequest = { showClearSessionDialog = false },
-            containerColor = Color.Transparent,
-            modifier = Modifier.refractiveGlass(
-                shape = RoundedCornerShape(24.dp),
-                isDark = isDark,
-                isAmoled = isAmoled,
-                elevation = 20.dp,
-                glowColor = MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
-            ),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             title = { Text("Clear Session?", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) },
             text = {
                 Text(

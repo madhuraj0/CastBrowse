@@ -56,9 +56,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Clean Vanilla Material Expressive Design System (Material 3 Latest)
- * Replaces synthetic glassmorphic/refractive shaders with pure, high-contrast,
- * accessible Material 3 surfaces, tonal elevations, and expressive rounded shapes.
+ * Material 3 Expressive Frosted Glass & Surface Design System
+ * Provides high-contrast, accessible Material 3 surfaces with subtle, crisp
+ * frosted-glass translucency, tonal elevation, and specular rim borders.
+ * Ensures all foreground text, icons, and buttons remain razor-sharp and unblurred.
  */
 object GlassmorphicTheme {
 
@@ -68,9 +69,9 @@ object GlassmorphicTheme {
         alphaMultiplier: Float = 1.0f
     ): Color {
         return when {
-            isAmoled -> Color(0xFF121212)
-            isDark -> Color(0xFF1E1F25)
-            else -> Color(0xFFF1F3F9)
+            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+            isDark -> Color(0xFF1E1F25).copy(alpha = (0.88f * alphaMultiplier).coerceIn(0f, 1f))
+            else -> Color(0xFFF2F4FA).copy(alpha = (0.90f * alphaMultiplier).coerceIn(0f, 1f))
         }
     }
 
@@ -148,6 +149,37 @@ class ChocolateBarShape(
 }
 
 /**
+ * Clean Material 3 Expressive Frosted Glass modifier.
+ * Applies subtle tonal elevation, soft drop shadow, translucent frosted container,
+ * and crisp specular border. All foreground contents stay 100% sharp.
+ */
+fun Modifier.frostedGlass(
+    shape: Shape = RoundedCornerShape(16.dp),
+    isDark: Boolean = true,
+    isAmoled: Boolean = false,
+    borderWidth: Dp = 1.dp,
+    elevation: Dp = 3.dp,
+    glowColor: Color? = null,
+    alpha: Float = 0.88f
+): Modifier = composed {
+    val containerColor = when {
+        isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = alpha)
+        else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = (alpha + 0.04f).coerceAtMost(1f))
+    }
+    val borderColor = glowColor?.copy(alpha = 0.45f)
+        ?: if (isAmoled) Color.White.copy(alpha = 0.15f)
+        else if (isDark) Color.White.copy(alpha = 0.12f)
+        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+
+    this
+        .shadow(elevation = elevation, shape = shape)
+        .clip(shape)
+        .background(containerColor)
+        .border(borderWidth, borderColor, shape)
+}
+
+/**
  * Modifier extension: Clean Material 3 Expressive Container
  */
 fun Modifier.glassmorphic(
@@ -156,15 +188,13 @@ fun Modifier.glassmorphic(
     isAmoled: Boolean = false,
     borderWidth: Dp = 1.dp,
     elevation: Dp = 2.dp
-): Modifier = composed {
-    val containerColor = if (isAmoled) Color(0xFF121212)
-    else MaterialTheme.colorScheme.surfaceContainer
-    this
-        .shadow(elevation = elevation, shape = shape)
-        .clip(shape)
-        .background(containerColor)
-        .border(borderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), shape)
-}
+): Modifier = frostedGlass(
+    shape = shape,
+    isDark = isDark,
+    isAmoled = isAmoled,
+    borderWidth = borderWidth,
+    elevation = elevation
+)
 
 /**
  * Modifier extension: Clean Material 3 Expressive Container Plate
@@ -176,16 +206,14 @@ fun Modifier.glassBackdropPlate(
     borderWidth: Dp = 1.dp,
     elevation: Dp = 2.dp,
     glowColor: Color? = null
-): Modifier = composed {
-    val containerColor = if (isAmoled) Color(0xFF121212)
-    else MaterialTheme.colorScheme.surfaceContainer
-    val borderColor = glowColor?.copy(alpha = 0.5f) ?: MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-    this
-        .shadow(elevation = elevation, shape = shape)
-        .clip(shape)
-        .background(containerColor)
-        .border(borderWidth, borderColor, shape)
-}
+): Modifier = frostedGlass(
+    shape = shape,
+    isDark = isDark,
+    isAmoled = isAmoled,
+    borderWidth = borderWidth,
+    elevation = elevation,
+    glowColor = glowColor
+)
 
 /**
  * Clean Material 3 Expressive Surface
@@ -202,9 +230,15 @@ fun RefractiveGlassSurface(
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val containerColor = if (isAmoled) Color(0xFF121212)
-    else MaterialTheme.colorScheme.surfaceContainer
-    val borderColor = glowColor?.copy(alpha = 0.5f) ?: MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    val containerColor = when {
+        isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+        isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
+        else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+    }
+    val borderColor = glowColor?.copy(alpha = 0.45f)
+        ?: if (isAmoled) Color.White.copy(alpha = 0.15f)
+        else if (isDark) Color.White.copy(alpha = 0.12f)
+        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
 
     Surface(
         shape = shape,
@@ -221,7 +255,7 @@ fun RefractiveGlassSurface(
 }
 
 /**
- * Modifier extension: Material 3 Expressive container
+ * Compatibility alias for frostedGlass
  */
 fun Modifier.refractiveGlass(
     shape: Shape = RoundedCornerShape(16.dp),
@@ -231,16 +265,14 @@ fun Modifier.refractiveGlass(
     elevation: Dp = 2.dp,
     glowColor: Color? = null,
     enableBlur: Boolean = false
-): Modifier = composed {
-    val containerColor = if (isAmoled) Color(0xFF121212)
-    else MaterialTheme.colorScheme.surfaceContainer
-    val borderColor = glowColor?.copy(alpha = 0.5f) ?: MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-    this
-        .shadow(elevation = elevation, shape = shape)
-        .clip(shape)
-        .background(containerColor)
-        .border(borderWidth, borderColor, shape)
-}
+): Modifier = frostedGlass(
+    shape = shape,
+    isDark = isDark,
+    isAmoled = isAmoled,
+    borderWidth = borderWidth,
+    elevation = elevation,
+    glowColor = glowColor
+)
 
 /**
  * Tactile fluid micro-interaction: Subtle scale down on click
@@ -390,32 +422,41 @@ fun ChocolateBottomBar(
             .padding(horizontal = 12.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
-        val containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer
+        val containerColor = when {
+            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
+            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+        }
+        val borderColor = if (isAmoled) Color.White.copy(alpha = 0.15f)
+            else if (isDark) Color.White.copy(alpha = 0.12f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = containerColor,
             tonalElevation = 3.dp,
             shadowElevation = 4.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            border = BorderStroke(1.dp, borderColor),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Top Row: Address bar & Quick actions
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    topRowContent()
-                }
+                if (currentNavTab == 0) {
+                    // Top Row: Address bar & Quick actions (Only visible when on Browser tab)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        topRowContent()
+                    }
 
-                // Clean Material 3 Divider
-                HorizontalDivider(
-                    thickness = 1.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                )
+                    // Clean Material 3 Divider
+                    HorizontalDivider(
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    )
+                }
 
                 // Bottom Row: Navigation Tabs
                 BoxWithConstraints(
@@ -553,13 +594,20 @@ fun FloatingGlassmorphicBottomBar(
             .padding(horizontal = 16.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        val containerColor = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer
+        val containerColor = when {
+            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
+            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+        }
+        val borderColor = if (isAmoled) Color.White.copy(alpha = 0.15f)
+            else if (isDark) Color.White.copy(alpha = 0.12f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = containerColor,
             tonalElevation = 4.dp,
             shadowElevation = 5.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            border = BorderStroke(1.dp, borderColor),
             modifier = Modifier
                 .height(54.dp)
                 .fillMaxWidth()
@@ -694,7 +742,7 @@ fun SpeedDialHomeScreen(
     var itemToDelete by remember { mutableStateOf<SpeedDialItem?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
-    val homeBg = if (isAmoled) Color.Black else MaterialTheme.colorScheme.surface
+    val homeBg = if (isAmoled) Color.Black else MaterialTheme.colorScheme.background
 
     Box(
         modifier = modifier
@@ -704,12 +752,11 @@ fun SpeedDialHomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Brand Header with Material 3 Surface
             Surface(

@@ -1912,7 +1912,7 @@ class MainActivity : ComponentActivity() {
         }
 
         Scaffold(
-            containerColor = Color.Transparent,
+            containerColor = if (isAmoled) Color.Black else MaterialTheme.colorScheme.background,
             topBar = {
                 if (currentNavTab == 0) {
                     if (!isBottomAddressBar) {
@@ -1920,7 +1920,11 @@ class MainActivity : ComponentActivity() {
                     } else if (showTabBar) {
                         Surface(
                             shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
-                            color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer,
+                            color = when {
+                                isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+                                isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
+                                else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+                            },
                             tonalElevation = 2.dp,
                             shadowElevation = 3.dp,
                             modifier = Modifier
@@ -1933,9 +1937,14 @@ class MainActivity : ComponentActivity() {
                 } else {
                     Surface(
                         shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                        color = if (isAmoled) Color(0xFF121212) else MaterialTheme.colorScheme.surfaceContainer,
+                        color = when {
+                            isAmoled -> Color(0xFF0F0F12).copy(alpha = 0.94f)
+                            isDark -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.88f)
+                            else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f)
+                        },
                         tonalElevation = 3.dp,
                         shadowElevation = 4.dp,
+                        border = BorderStroke(1.dp, if (isAmoled) Color.White.copy(alpha = 0.15f) else if (isDark) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding()
@@ -1982,7 +1991,7 @@ class MainActivity : ComponentActivity() {
                     miniPlayerStrip()
                     if (isBottomAddressBar) {
                         AnimatedVisibility(
-                            visible = showFindInPage,
+                            visible = showFindInPage && currentNavTab == 0,
                             enter = expandVertically() + fadeIn(),
                             exit = shrinkVertically() + fadeOut()
                         ) {
@@ -2009,10 +2018,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         ) { paddingValues ->
+            val topPad = if (isBottomAddressBar && !showTabBar && currentNavTab == 0) {
+                WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            } else {
+                paddingValues.calculateTopPadding()
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = paddingValues.calculateTopPadding())
+                    .padding(
+                        top = topPad,
+                        bottom = paddingValues.calculateBottomPadding()
+                    )
+                    .background(if (isAmoled) Color.Black else MaterialTheme.colorScheme.background)
             ) {
                 Box(
                     modifier = Modifier
