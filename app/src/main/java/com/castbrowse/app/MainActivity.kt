@@ -845,12 +845,12 @@ class MainActivity : ComponentActivity() {
                 headers["Cookie"] = cookies
             }
 
-            // For AirPlay: if it is a standard web stream without strict cookies/referer, send the direct URL
+            // For AirPlay: if it is a standard web stream without strict cookies, send the direct URL
             // so the receiver (Mac / Apple TV / Android) plays directly via native hardware/codecs and ATS compliance.
-            // If custom cookies or referer are present, or for DLNA/WebReceiver, route through LocalMediaProxy.
+            // If custom cookies are present, or for DLNA/WebReceiver, route through LocalMediaProxy.
             val proxiedUrl = if (videoUrl.contains("/local?id=")) {
                 videoUrl
-            } else if (device.protocol == CastProtocol.AIRPLAY && (headers["Cookie"].isNullOrEmpty() && headers["Referer"].isNullOrEmpty())) {
+            } else if (device.protocol == CastProtocol.AIRPLAY && headers["Cookie"].isNullOrEmpty()) {
                 videoUrl
             } else {
                 LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)

@@ -48,9 +48,9 @@ This document is intended for the `agy` CLI agent running on the local PC to tro
    - *Action*: Disconnect Tailscale on the phone. Ensure the phone, PC, and AirPlay target (Android tablet / Mac) are on the same local Wi-Fi network (e.g. `192.168.1.0/24`). Test casting.
 
 2. **Test with a Known-Good Standard MP4 Video**:
-   - *Why*: AirPlay receivers (especially macOS AVPlayer) strictly reject formats like WebM, VP8, VP9, AVI, or non-H.264/AAC containers. If an unsupported codec is sent, the receiver blinks and immediately dismisses the player without an error dialog.
+   - *Why*: AirPlay receivers (especially macOS AVPlayer) strictly reject formats like WebM, VP8, VP9, AVI, or non-H.264/AAC containers. If an unsupported codec is sent, the receiver blinks and immediately dismisses the player without an error dialog. Also note that some older sample URLs (like Google's old BigBuckBunny GCS bucket) now return HTTP 403 Forbidden.
    - *Action*: Cast this verified public test stream:
-     `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4`
+     `https://vjs.zencdn.net/v/oceans.mp4`
 
 3. **Use the "Android AirPlay" receiver for rapid iteration**:
    - As requested by the user, test primarily with the Android AirPlay server app on the tablet, as it does not require interactive confirmation prompts on every connection.

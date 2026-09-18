@@ -58,7 +58,7 @@ class CastWizardActivity : ComponentActivity() {
     private lateinit var discoveryService: SsdpDiscoveryService
 
     companion object {
-        private const val TEST_VIDEO_URL = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+        private const val TEST_VIDEO_URL = "https://vjs.zencdn.net/v/oceans.mp4"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

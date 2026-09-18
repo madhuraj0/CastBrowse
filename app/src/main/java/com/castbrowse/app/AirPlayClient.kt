@@ -7,18 +7,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.math.log10
-import kotlin.math.roundToInt
 
 object AirPlayClient {
 
@@ -27,8 +26,8 @@ object AirPlayClient {
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
         .build()
 
     private var pollJob: Job? = null
@@ -36,12 +35,124 @@ object AirPlayClient {
     private var activePort: Int = AIRPLAY_DEFAULT_PORT
     private var activeSessionId: String? = null
 
+    private var sessionSocket: Socket? = null
+    private val socketLock = Any()
+
+    private fun closeSessionSocket() {
+        synchronized(socketLock) {
+            try {
+                sessionSocket?.close()
+            } catch (e: Exception) {}
+            sessionSocket = null
+        }
+    }
+
+    private var isTargetModernApple: Boolean = false
+
+    /**
+     * Sends an HTTP request over the active persistent session socket.
+     * AirPlay receivers (especially UxPlay on Android/Linux) associate the active
+     * video session with the TCP connection that issued POST /play.
+     */
+    private fun sendSessionRequest(
+        method: String,
+        path: String,
+        contentType: String? = null,
+        body: ByteArray? = null
+    ): Pair<Int, ByteArray> = synchronized(socketLock) {
+        val socket = sessionSocket ?: return Pair(-1, ByteArray(0))
+        return try {
+            val out = socket.getOutputStream()
+            val inp = socket.getInputStream()
+
+            val host = activeHost ?: "127.0.0.1"
+            val port = activePort
+            val sessionId = activeSessionId ?: UUID.randomUUID().toString()
+
+            val headerBuilder = StringBuilder()
+            headerBuilder.append("$method $path HTTP/1.1\r\n")
+            headerBuilder.append("Host: $host:$port\r\n")
+            headerBuilder.append("User-Agent: MediaControl/1.0\r\n")
+            headerBuilder.append("X-Apple-Device-Name: CastBrowse\r\n")
+            headerBuilder.append("X-Apple-Session-ID: $sessionId\r\n")
+            headerBuilder.append("X-Apple-ProtocolVersion: 1\r\n")
+            if (contentType != null) {
+                headerBuilder.append("Content-Type: $contentType\r\n")
+            }
+            val length = body?.size ?: 0
+            headerBuilder.append("Content-Length: $length\r\n")
+            headerBuilder.append("\r\n")
+
+            out.write(headerBuilder.toString().toByteArray(Charsets.US_ASCII))
+            if (body != null && body.isNotEmpty()) {
+                out.write(body)
+            }
+            out.flush()
+
+            val headerBytes = ByteArrayOutputStream()
+            var matched = 0
+            var b: Int
+            while (inp.read().also { b = it } != -1) {
+                headerBytes.write(b)
+                if ((matched == 0 || matched == 2) && b == '\r'.code) {
+                    matched++
+                } else if ((matched == 1 || matched == 3) && b == '\n'.code) {
+                    matched++
+                    if (matched == 4) break
+                } else {
+                    matched = 0
+                }
+            }
+
+            val headerStr = headerBytes.toString("UTF-8")
+            val lines = headerStr.lines()
+            val statusLine = lines.firstOrNull() ?: ""
+            val statusParts = statusLine.split(" ")
+            val statusCode = if (statusParts.size >= 2) statusParts[1].toIntOrNull() ?: -1 else -1
+
+            var contentLength = 0
+            for (line in lines) {
+                val colon = line.indexOf(':')
+                if (colon != -1) {
+                    val k = line.substring(0, colon).trim()
+                    val v = line.substring(colon + 1).trim()
+                    if (k.equals("content-length", ignoreCase = true)) {
+                        contentLength = v.toIntOrNull() ?: 0
+                    }
+                }
+            }
+
+            val responseBytes = if (contentLength > 0) {
+                val buf = ByteArray(contentLength)
+                var read = 0
+                while (read < contentLength) {
+                    val count = inp.read(buf, read, contentLength - read)
+                    if (count == -1) break
+                    read += count
+                }
+                if (read == contentLength) buf else buf.copyOf(read)
+            } else {
+                ByteArray(0)
+            }
+
+            Pair(statusCode, responseBytes)
+        } catch (e: Exception) {
+            Log.w(TAG, "AirPlay session socket error: ${e.message}")
+            Pair(-1, ByteArray(0))
+        }
+    }
+
     /**
      * Sends a pre-flight GET /info request to wake up the receiver, verify
      * AirPlay service availability, and check for permission restrictions.
+     * Returns true if receiver is a modern Apple receiver (e.g. macOS Monterey+, Apple TV 4K / tvOS 10.2+)
+     * where /info succeeds with HTTP 200 and expects binary plist.
+     * Returns false if receiver is legacy or third-party (e.g. Android AirPlay, Kodi, UxPlay, Apple TV 2/3)
+     * where /info returns 404 or Server header is AirTunes and expects text/parameters.
      */
-    private fun preflightCheck(host: String, port: Int): Result<Unit> {
-        return runCatching {
+    private fun preflightCheck(host: String, port: Int): Boolean {
+        var isModernApple = false
+        try {
             val request = Request.Builder()
                 .url("http://$host:$port/info")
                 .addHeader("User-Agent", "MediaControl/1.0")
@@ -71,8 +182,22 @@ object AirPlayClient {
                         "'Anyone on the same network' or 'Everyone' without a password."
                     )
                 }
+                if (resp.isSuccessful || resp.code == 200) {
+                    val serverHeader = resp.header("Server") ?: ""
+                    val contentType = resp.header("Content-Type") ?: ""
+                    // macOS ControlCenter and tvOS 10.2+ respond with application/x-apple-binary-plist
+                    // even though Server header is AirTunes/9xx. Third-party servers (Android AirPlay, Kodi)
+                    // do not return binary plist for /info.
+                    if (contentType.contains("plist", ignoreCase = true) || !serverHeader.contains("AirTunes", ignoreCase = true)) {
+                        isModernApple = true
+                    }
+                }
             }
+        } catch (e: Exception) {
+            if (e.message?.contains("403") == true) throw e
+            Log.w(TAG, "AirPlay: Pre-flight check notice: ${e.message}")
         }
+        return isModernApple
     }
 
     suspend fun play(
@@ -84,95 +209,116 @@ object AirPlayClient {
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             stopPolling()
+            closeSessionSocket()
+
             activeHost = ipAddress
             activePort = if (port > 0) port else AIRPLAY_DEFAULT_PORT
             val sessionId = UUID.randomUUID().toString()
             activeSessionId = sessionId
 
-            Log.d(TAG, "AirPlay: Playing '$title' ($url) on $ipAddress:$activePort (session: $sessionId)")
+            Log.i(TAG, "AirPlay: Playing '$title' ($url) on $ipAddress:$activePort (session: $sessionId)")
 
-            // Step 1: Pre-flight check / wake-up
-            try {
-                preflightCheck(ipAddress, activePort).getOrThrow()
-            } catch (e: Exception) {
-                if (e.message?.contains("403 Forbidden") == true) {
-                    throw e
-                }
-                Log.w(TAG, "AirPlay: Pre-flight check notice: ${e.message}")
-            }
+            // Step 1: Pre-flight check & device classification
+            val isModernApple = preflightCheck(ipAddress, activePort)
+            isTargetModernApple = isModernApple
+            Log.i(TAG, "AirPlay: Target $ipAddress:$activePort classified as modernApple=$isModernApple")
 
-            // Step 2: Try modern Apple binary plist format first (required by macOS Monterey+, tvOS 10.2+)
+            // Step 2: Establish persistent session TCP socket
+            val socket = Socket()
+            socket.soTimeout = 8000
+            socket.connect(InetSocketAddress(ipAddress, activePort), 6000)
+            socket.tcpNoDelay = true
+            sessionSocket = socket
+
             var playSuccess = false
             var lastErrorCode = 0
             var lastErrorMessage = ""
 
-            try {
-                val bplistBytes = createPlayBinaryPlist(url, 0.0)
-                val bplistRequest = Request.Builder()
-                    .url("http://$ipAddress:$activePort/play")
-                    .addHeader("Content-Type", "application/x-apple-binary-plist")
-                    .addHeader("User-Agent", "MediaControl/1.0")
-                    .addHeader("X-Apple-Session-ID", sessionId)
-                    .addHeader("Connection", "close")
-                    .post(bplistBytes.toRequestBody("application/x-apple-binary-plist".toMediaType()))
-                    .build()
-
-                httpClient.newCall(bplistRequest).execute().use { response ->
-                    lastErrorCode = response.code
-                    lastErrorMessage = response.message
-                    if (response.isSuccessful || response.code == 200) {
-                        playSuccess = true
-                        Log.d(TAG, "AirPlay: Binary plist /play succeeded with HTTP ${response.code}")
-                    } else if (response.code == 403) {
+            fun tryBinaryPlist(): Boolean {
+                return try {
+                    val bplistBytes = createPlayBinaryPlist(url, 0.0, sessionId)
+                    val (code, respBytes) = sendSessionRequest(
+                        method = "POST",
+                        path = "/play",
+                        contentType = "application/x-apple-binary-plist",
+                        body = bplistBytes
+                    )
+                    lastErrorCode = code
+                    lastErrorMessage = String(respBytes, Charsets.UTF_8)
+                    if (code in 200..299) {
+                        Log.i(TAG, "AirPlay: Binary plist /play succeeded with HTTP $code")
+                        true
+                    } else if (code == 403) {
                         throw Exception(
                             "AirPlay connection forbidden (HTTP 403). If casting to Mac or Apple TV, " +
                             "ensure 'Allow AirPlay for' is set to 'Anyone on the same network' or 'Everyone' " +
                             "in macOS System Settings > AirDrop & Handoff."
                         )
+                    } else {
+                        false
                     }
-                    Unit
+                } catch (e: Exception) {
+                    if (e.message?.contains("403") == true) throw e
+                    Log.w(TAG, "AirPlay: Binary plist /play attempt failed: ${e.message}")
+                    false
                 }
-            } catch (e: Exception) {
-                if (e.message?.contains("403") == true) throw e
-                Log.w(TAG, "AirPlay: Binary plist /play attempt failed: ${e.message}, trying text/parameters fallback...")
             }
 
-            // Step 3: Fallback to legacy text/parameters if binary plist was rejected
-            if (!playSuccess) {
-                val textBody = "Content-Location: $url\r\nStart-Position: 0.0\r\n"
-                val textRequest = Request.Builder()
-                    .url("http://$ipAddress:$activePort/play")
-                    .addHeader("Content-Type", "text/parameters")
-                    .addHeader("User-Agent", "MediaControl/1.0")
-                    .addHeader("X-Apple-Session-ID", sessionId)
-                    .addHeader("Connection", "close")
-                    .post(textBody.toRequestBody("text/parameters".toMediaType()))
-                    .build()
-
-                httpClient.newCall(textRequest).execute().use { response ->
-                    lastErrorCode = response.code
-                    lastErrorMessage = response.message
-                    if (response.isSuccessful || response.code == 200) {
-                        playSuccess = true
-                        Log.d(TAG, "AirPlay: text/parameters /play succeeded with HTTP ${response.code}")
-                    } else if (response.code == 403) {
+            fun tryTextParameters(): Boolean {
+                return try {
+                    val textBody = "Content-Location: $url\r\nStart-Position: 0.0\r\n".toByteArray(Charsets.UTF_8)
+                    val (code, respBytes) = sendSessionRequest(
+                        method = "POST",
+                        path = "/play",
+                        contentType = "text/parameters",
+                        body = textBody
+                    )
+                    lastErrorCode = code
+                    lastErrorMessage = String(respBytes, Charsets.UTF_8)
+                    if (code in 200..299) {
+                        Log.i(TAG, "AirPlay: text/parameters /play succeeded with HTTP $code")
+                        true
+                    } else if (code == 403) {
                         throw Exception(
                             "AirPlay connection forbidden (HTTP 403). If casting to Mac or Apple TV, " +
                             "ensure 'Allow AirPlay for' is set to 'Anyone on the same network' or 'Everyone' " +
                             "in macOS System Settings > AirDrop & Handoff."
                         )
+                    } else {
+                        false
                     }
-                    Unit
+                } catch (e: Exception) {
+                    if (e.message?.contains("403") == true) throw e
+                    Log.w(TAG, "AirPlay: text/parameters /play attempt failed: ${e.message}")
+                    false
+                }
+            }
+
+            // Step 3: Negotiate payload format
+            // If modern Apple (macOS Monterey+, tvOS 10.2+), try binary plist first then text/parameters.
+            // If legacy or third-party (Android AirPlay, Kodi, UxPlay, AppleTV3), send text/parameters first!
+            if (isModernApple) {
+                playSuccess = tryBinaryPlist()
+                if (!playSuccess) {
+                    Log.i(TAG, "AirPlay: Falling back to text/parameters for modern target...")
+                    playSuccess = tryTextParameters()
+                }
+            } else {
+                playSuccess = tryTextParameters()
+                if (!playSuccess) {
+                    Log.i(TAG, "AirPlay: Falling back to binary plist for legacy/third-party target...")
+                    playSuccess = tryBinaryPlist()
                 }
             }
 
             if (!playSuccess) {
+                closeSessionSocket()
                 throw Exception("AirPlay /play failed with HTTP $lastErrorCode: $lastErrorMessage")
             }
 
             // Explicitly set rate=1.0 so receiver begins playback immediately
             try {
-                sendRate(ipAddress, activePort, 1.0f)
+                sendRate(1.0f)
             } catch (e: Exception) {
                 Log.w(TAG, "AirPlay: rate=1 notice: ${e.message}")
             }
@@ -181,13 +327,12 @@ object AirPlayClient {
             CastSessionManager.playbackState = 1
             CastSessionManager.playbackPositionSeconds = 0.0
 
-            startPolling(ipAddress, activePort, sessionId, onDisconnected)
+            startPolling(onDisconnected)
         }
     }
 
-    suspend fun pause(ipAddress: String? = activeHost, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
-        val host = ipAddress ?: activeHost ?: return@withContext false
-        val ok = sendRate(host, port, 0.0f)
+    suspend fun pause(ipAddress: String? = null, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
+        val ok = sendRate(0.0f)
         if (ok) {
             CastSessionManager.isMediaPlaying = false
             CastSessionManager.playbackState = 2
@@ -195,9 +340,8 @@ object AirPlayClient {
         ok
     }
 
-    suspend fun resume(ipAddress: String? = activeHost, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
-        val host = ipAddress ?: activeHost ?: return@withContext false
-        val ok = sendRate(host, port, 1.0f)
+    suspend fun resume(ipAddress: String? = null, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
+        val ok = sendRate(1.0f)
         if (ok) {
             CastSessionManager.isMediaPlaying = true
             CastSessionManager.playbackState = 1
@@ -205,184 +349,113 @@ object AirPlayClient {
         ok
     }
 
-    suspend fun stop(ipAddress: String? = activeHost, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
-        val host = ipAddress ?: activeHost ?: return@withContext false
+    suspend fun stop(ipAddress: String? = null, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
         stopPolling()
-        val builder = Request.Builder()
-            .url("http://$host:$port/stop")
-            .addHeader("User-Agent", "MediaControl/1.0")
-            .addHeader("Connection", "close")
-            .post("".toRequestBody())
-        activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
-
-        val ok = try {
-            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
-        } catch (e: Exception) {
-            false
-        }
+        val (code, _) = sendSessionRequest("POST", "/stop")
+        closeSessionSocket()
         CastSessionManager.isMediaPlaying = false
         CastSessionManager.playbackState = 0
         CastSessionManager.playbackPositionSeconds = 0.0
         activeHost = null
         activeSessionId = null
-        ok
+        code in 200..299
     }
 
-    suspend fun seek(seconds: Double, ipAddress: String? = activeHost, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
-        val host = ipAddress ?: activeHost ?: return@withContext false
-        val builder = Request.Builder()
-            .url("http://$host:$port/scrub?position=$seconds")
-            .addHeader("User-Agent", "MediaControl/1.0")
-            .addHeader("Connection", "close")
-            .post("".toRequestBody())
-        activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
-
-        val ok = try {
-            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
-        } catch (e: Exception) {
-            false
-        }
+    suspend fun seek(seconds: Double, ipAddress: String? = null, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
+        val (code, _) = sendSessionRequest("POST", "/scrub?position=$seconds")
+        val ok = code in 200..299
         if (ok) {
             CastSessionManager.playbackPositionSeconds = seconds
         }
         ok
     }
 
-    suspend fun setVolume(volume: Float, ipAddress: String? = activeHost, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
-        val host = ipAddress ?: activeHost ?: return@withContext false
+    suspend fun setVolume(volume: Float, ipAddress: String? = null, port: Int = activePort): Boolean = withContext(Dispatchers.IO) {
         val clamped = volume.coerceIn(0f, 1f)
-
-        // Convert linear 0.0..1.0 to AirPlay dB scale (-30.00 dB to 0.00 dB)
         val db = if (clamped <= 0.001f) -144.0f else (20.0f * log10(clamped)).coerceIn(-30.0f, 0.0f)
-
-        val ok = sendVolumeParam(host, port, "volume", String.format(java.util.Locale.US, "%.6f", db)) ||
-                 sendVolumeParam(host, port, "value", clamped.toString())
-
+        val (code1, _) = sendSessionRequest("POST", "/volume?volume=${String.format(java.util.Locale.US, "%.6f", db)}")
+        val ok = if (code1 in 200..299) true else {
+            val (code2, _) = sendSessionRequest("POST", "/volume?value=$clamped")
+            code2 in 200..299
+        }
         if (ok) {
             CastSessionManager.volume = clamped
         }
         ok
     }
 
-    private fun sendVolumeParam(host: String, port: Int, paramName: String, value: String): Boolean {
-        return try {
-            val builder = Request.Builder()
-                .url("http://$host:$port/volume?$paramName=$value")
-                .addHeader("User-Agent", "MediaControl/1.0")
-                .addHeader("Connection", "close")
-                .post("".toRequestBody())
-            activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
-            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
-        } catch (e: Exception) {
-            false
-        }
+    private fun sendRate(rate: Float): Boolean {
+        val (code, _) = sendSessionRequest("POST", "/rate?value=$rate")
+        return code in 200..299
     }
 
-    private fun sendRate(host: String, port: Int, rate: Float): Boolean {
-        return try {
-            val builder = Request.Builder()
-                .url("http://$host:$port/rate?value=$rate")
-                .addHeader("User-Agent", "MediaControl/1.0")
-                .addHeader("Connection", "close")
-                .post("".toRequestBody())
-            activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
-            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error setting rate to $rate", e)
-            false
-        }
-    }
-
-    private fun sendStop(host: String, port: Int): Boolean {
-        return try {
-            val builder = Request.Builder()
-                .url("http://$host:$port/stop")
-                .addHeader("User-Agent", "MediaControl/1.0")
-                .addHeader("Connection", "close")
-                .post("".toRequestBody())
-            activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
-            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun sendScrub(host: String, port: Int, position: Double): Boolean {
-        return try {
-            val builder = Request.Builder()
-                .url("http://$host:$port/scrub?position=$position")
-                .addHeader("User-Agent", "MediaControl/1.0")
-                .addHeader("Connection", "close")
-                .post("".toRequestBody())
-            activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
-            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun sendVolume(host: String, port: Int, db: Float): Boolean {
-        val clamped = ((db + 30.0f) / 30.0f).coerceIn(0f, 1f)
-        return sendVolumeParam(host, port, "volume", String.format(java.util.Locale.US, "%.6f", db)) ||
-                 sendVolumeParam(host, port, "value", clamped.toString())
-    }
-
-    private fun startPolling(
-        host: String,
-        port: Int,
-        sessionId: String,
-        onDisconnected: (() -> Unit)? = null
-    ) {
+    private fun startPolling(onDisconnected: (() -> Unit)? = null) {
         stopPolling()
         pollJob = CoroutineScope(Dispatchers.IO).launch {
             var consecutiveNetworkFails = 0
-            var pollCycle = 0
-            while (CastSessionManager.isMediaPlaying) {
+            var apple500Count = 0
+            while (CastSessionManager.isMediaPlaying && sessionSocket?.isConnected == true) {
                 delay(1000)
-                pollCycle++
                 try {
-                    val builder = Request.Builder()
-                        .url("http://$host:$port/scrub")
-                        .addHeader("User-Agent", "MediaControl/1.0")
-                        .addHeader("X-Apple-Session-ID", sessionId)
-                        .addHeader("Connection", "close")
-                        .get()
+                    if (isTargetModernApple && apple500Count >= 2) {
+                        // Modern Apple receivers (macOS Monterey+, tvOS 10.2+) reject /playback-info with 500
+                        // because they manage playback independently without RTSP polling.
+                        // Advance position locally to keep UI progress bar responsive and keep session socket open.
+                        CastSessionManager.playbackPositionSeconds += 1.0
+                        continue
+                    }
 
-                    val response = httpClient.newCall(builder.build()).execute()
-                    response.use { resp ->
-                        if (resp.isSuccessful) {
-                            consecutiveNetworkFails = 0
-                            val body = resp.body?.string() ?: ""
-                            parseScrubResponse(body)
-                        } else if (resp.code == 404 || resp.code == 403) {
-                            consecutiveNetworkFails++
+                    val path = if (isTargetModernApple) "/playback-info" else "/scrub"
+                    val (code, bodyBytes) = sendSessionRequest("GET", path)
+                    if (code in 200..299) {
+                        consecutiveNetworkFails = 0
+                        apple500Count = 0
+                        if (bodyBytes.isNotEmpty()) {
+                            val magic = if (bodyBytes.size >= 8) String(bodyBytes, 0, 8, Charsets.US_ASCII) else ""
+                            if (magic.startsWith("bplist00")) {
+                                parsePlaybackInfoResponse(bodyBytes)
+                            } else {
+                                parseScrubResponse(String(bodyBytes, Charsets.UTF_8))
+                            }
+                        }
+                    } else if (code == 500 || code == 404) {
+                        if (isTargetModernApple) {
+                            apple500Count++
+                            // DO NOT treat HTTP 500 as network failure! Receiver is alive.
+                            CastSessionManager.playbackPositionSeconds += 1.0
                         } else {
-                            // On 500 (buffering or modern receiver), query /playback-info as well
-                            try {
-                                val infoReq = Request.Builder()
-                                    .url("http://$host:$port/playback-info")
-                                    .addHeader("User-Agent", "MediaControl/1.0")
-                                    .addHeader("X-Apple-Session-ID", sessionId)
-                                    .addHeader("Connection", "close")
-                                    .get()
-                                httpClient.newCall(infoReq.build()).execute().use { infoResp ->
-                                    if (infoResp.isSuccessful) {
-                                        consecutiveNetworkFails = 0
-                                    } else if (infoResp.code == 404 || infoResp.code == 403) {
-                                        consecutiveNetworkFails++
+                            val (infoCode, infoBytes) = sendSessionRequest("GET", "/playback-info")
+                            if (infoCode in 200..299) {
+                                isTargetModernApple = true
+                                consecutiveNetworkFails = 0
+                                apple500Count = 0
+                                if (infoBytes.isNotEmpty()) {
+                                    val magic = if (infoBytes.size >= 8) String(infoBytes, 0, 8, Charsets.US_ASCII) else ""
+                                    if (magic.startsWith("bplist00")) {
+                                        parsePlaybackInfoResponse(infoBytes)
+                                    } else {
+                                        parseScrubResponse(String(infoBytes, Charsets.UTF_8))
                                     }
                                 }
-                            } catch (e: Exception) {}
+                            } else if (infoCode == 500) {
+                                isTargetModernApple = true
+                                apple500Count++
+                                CastSessionManager.playbackPositionSeconds += 1.0
+                            } else {
+                                consecutiveNetworkFails++
+                            }
                         }
+                    } else if (code == -1 || code == 403) {
+                        consecutiveNetworkFails++
                     }
-                } catch (e: IOException) {
-                    consecutiveNetworkFails++
                 } catch (e: Exception) {
+                    consecutiveNetworkFails++
                 }
 
-                if (consecutiveNetworkFails > 20) {
-                    Log.w(TAG, "AirPlay: Receiver unreachable for 20s, triggering disconnect")
+                if (consecutiveNetworkFails > 10) {
+                    Log.w(TAG, "AirPlay: Receiver socket disconnected, triggering disconnect")
                     stopPolling()
+                    closeSessionSocket()
                     onDisconnected?.invoke()
                     break
                 }
@@ -417,66 +490,178 @@ object AirPlayClient {
         }
     }
 
+    private fun parsePlaybackInfoResponse(bytes: ByteArray) {
+        if (bytes.size < 32) return
+        try {
+            val trailerStart = bytes.size - 32
+            val offsetSize = bytes[trailerStart + 6].toInt() and 0xFF
+            val refSize = bytes[trailerStart + 7].toInt() and 0xFF
+            val numObjects = ByteBuffer.wrap(bytes, trailerStart + 8, 8).order(ByteOrder.BIG_ENDIAN).long.toInt()
+            val topObject = ByteBuffer.wrap(bytes, trailerStart + 16, 8).order(ByteOrder.BIG_ENDIAN).long.toInt()
+            val offsetTableOffset = ByteBuffer.wrap(bytes, trailerStart + 24, 8).order(ByteOrder.BIG_ENDIAN).long.toInt()
+
+            if (offsetTableOffset < 0 || offsetTableOffset >= bytes.size || numObjects <= 0) return
+
+            val offsets = IntArray(numObjects)
+            for (i in 0 until numObjects) {
+                var off = 0
+                for (j in 0 until offsetSize) {
+                    off = (off shl 8) or (bytes[offsetTableOffset + i * offsetSize + j].toInt() and 0xFF)
+                }
+                offsets[i] = off
+            }
+
+            fun parseString(off: Int): String {
+                if (off < 0 || off >= bytes.size) return ""
+                val header = bytes[off].toInt() and 0xFF
+                val info = header and 0x0F
+                var pos = off + 1
+                var len = info
+                if (info == 0x0F && pos < bytes.size) {
+                    val extraHeader = bytes[pos].toInt() and 0xFF
+                    val extraSize = 1 shl (extraHeader and 0x0F)
+                    pos += 1
+                    len = 0
+                    for (k in 0 until extraSize) {
+                        if (pos + k < bytes.size) {
+                            len = (len shl 8) or (bytes[pos + k].toInt() and 0xFF)
+                        }
+                    }
+                    pos += extraSize
+                }
+                if (pos + len <= bytes.size && len > 0) {
+                    return String(bytes, pos, len, Charsets.UTF_8)
+                }
+                return ""
+            }
+
+            fun parseNumber(off: Int): Double {
+                if (off < 0 || off >= bytes.size) return 0.0
+                val header = bytes[off].toInt() and 0xFF
+                val objType = header and 0xF0
+                val info = header and 0x0F
+                if (objType == 0x10) { // Int
+                    val size = 1 shl info
+                    var v = 0L
+                    for (k in 0 until size) {
+                        if (off + 1 + k < bytes.size) {
+                            v = (v shl 8) or (bytes[off + 1 + k].toLong() and 0xFF)
+                        }
+                    }
+                    return v.toDouble()
+                } else if (objType == 0x20) { // Real
+                    val size = 1 shl info
+                    if (size == 4 && off + 5 <= bytes.size) {
+                        return ByteBuffer.wrap(bytes, off + 1, 4).order(ByteOrder.BIG_ENDIAN).float.toDouble()
+                    } else if (size == 8 && off + 9 <= bytes.size) {
+                        return ByteBuffer.wrap(bytes, off + 1, 8).order(ByteOrder.BIG_ENDIAN).double
+                    }
+                }
+                return 0.0
+            }
+
+            val rootOff = offsets[topObject]
+            val rootHeader = bytes[rootOff].toInt() and 0xFF
+            if ((rootHeader and 0xF0) == 0xD0) {
+                val count = rootHeader and 0x0F
+                var pos = rootOff + 1
+                val keys = IntArray(count)
+                for (i in 0 until count) {
+                    var ref = 0
+                    for (j in 0 until refSize) {
+                        if (pos < bytes.size) {
+                            ref = (ref shl 8) or (bytes[pos++].toInt() and 0xFF)
+                        }
+                    }
+                    keys[i] = ref
+                }
+                val vals = IntArray(count)
+                for (i in 0 until count) {
+                    var ref = 0
+                    for (j in 0 until refSize) {
+                        if (pos < bytes.size) {
+                            ref = (ref shl 8) or (bytes[pos++].toInt() and 0xFF)
+                        }
+                    }
+                    vals[i] = ref
+                }
+
+                for (i in 0 until count) {
+                    if (keys[i] in 0 until numObjects && vals[i] in 0 until numObjects) {
+                        val keyName = parseString(offsets[keys[i]])
+                        if (keyName.equals("position", ignoreCase = true)) {
+                            CastSessionManager.playbackPositionSeconds = parseNumber(offsets[vals[i]])
+                        } else if (keyName.equals("duration", ignoreCase = true)) {
+                            val dur = parseNumber(offsets[vals[i]])
+                            if (dur > 0) CastSessionManager.mediaDurationSeconds = dur
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "AirPlay: Error parsing playback-info bplist: ${e.message}")
+        }
+    }
+
     /**
-     * Creates an Apple binary property list (bplist00) containing:
-     *   Content-Location: $url
-     *   Start-Position: $startPosition
+     * Creates an Apple binary property list (bplist00) containing AirPlay stream parameters:
+     *   Content-Location (String), Start-Position (String %.6f), X-Apple-Session-ID (String).
      *
-     * Fully compatible with modern macOS and tvOS AirPlay receivers.
+     * Keys are strictly sorted in lexicographical ASCII order as required by Apple's CFPropertyList binary parser:
+     *   'Content-Location' ('C') < 'Start-Position' ('S') < 'X-Apple-Session-ID' ('X').
+     *
+     * Fully compatible with modern macOS (Monterey, Ventura, Sonoma, Sequoia) AVPlayer and tvOS receivers.
      */
-    fun createPlayBinaryPlist(url: String, startPosition: Double = 0.0): ByteArray {
-        val urlBytes = url.toByteArray(Charsets.UTF_8)
+    fun createPlayBinaryPlist(
+        url: String,
+        startPosition: Double = 0.0,
+        sessionId: String = UUID.randomUUID().toString()
+    ): ByteArray {
         val baos = ByteArrayOutputStream()
         val offsets = mutableListOf<Int>()
+
+        fun writeString(s: String) {
+            offsets.add(baos.size())
+            val b = s.toByteArray(Charsets.UTF_8)
+            val len = b.size
+            if (len < 15) {
+                baos.write(0x50 or len)
+            } else if (len < 256) {
+                baos.write(0x5F)
+                baos.write(0x10)
+                baos.write(len)
+            } else {
+                baos.write(0x5F)
+                baos.write(0x11)
+                baos.write((len shr 8) and 0xFF)
+                baos.write(len and 0xFF)
+            }
+            baos.write(b)
+        }
 
         // 8-byte header: "bplist00"
         baos.write("bplist00".toByteArray(Charsets.US_ASCII))
 
-        // Object 0: Dictionary of 2 key/value pairs
-        // Type 0xD0 | count (2) => 0xD2
-        // Object refs: key0=obj1, key1=obj2, val0=obj3, val1=obj4
-        offsets.add(baos.size())
-        baos.write(0xD2)
-        baos.write(1)
-        baos.write(2)
-        baos.write(3)
-        baos.write(4)
+        val keys = listOf("Content-Location", "Start-Position", "X-Apple-Session-ID")
+        val formattedPos = String.format(java.util.Locale.US, "%.6f", startPosition)
+        val values = listOf(url, formattedPos, sessionId)
+        val count = keys.size
 
-        // Object 1: ASCII String "Content-Location" (16 chars: 0x5F, 0x10, 16)
+        // Object 0: Dictionary with `count` items
         offsets.add(baos.size())
-        baos.write(0x5F)
-        baos.write(0x10)
-        baos.write(16)
-        baos.write("Content-Location".toByteArray(Charsets.US_ASCII))
+        baos.write(0xD0 or count)
+        for (i in 1..count) baos.write(i)
+        for (i in (count + 1)..(2 * count)) baos.write(i)
 
-        // Object 2: ASCII String "Start-Position" (14 chars: 0x5E)
-        offsets.add(baos.size())
-        baos.write(0x5E)
-        baos.write("Start-Position".toByteArray(Charsets.US_ASCII))
-
-        // Object 3: UTF-8 String URL
-        offsets.add(baos.size())
-        val uLen = urlBytes.size
-        if (uLen < 15) {
-            baos.write(0x50 or uLen)
-        } else if (uLen < 256) {
-            baos.write(0x5F)
-            baos.write(0x10)
-            baos.write(uLen)
-        } else {
-            baos.write(0x5F)
-            baos.write(0x11)
-            baos.write((uLen shr 8) and 0xFF)
-            baos.write(uLen and 0xFF)
+        // Keys (indices 1..count)
+        for (k in keys) {
+            writeString(k)
         }
-        baos.write(urlBytes)
 
-        // Object 4: Real / 8-byte IEEE-754 double (0x23)
-        offsets.add(baos.size())
-        baos.write(0x23)
-        val doubleBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
-        doubleBuf.putDouble(startPosition)
-        baos.write(doubleBuf.array())
+        // Values (indices count+1..2*count)
+        for (v in values) {
+            writeString(v)
+        }
 
         // Offset Table
         val offsetTableOffset = baos.size()
@@ -491,19 +676,15 @@ object AirPlayClient {
         }
 
         // 32-byte Trailer
-        // 6 unused bytes
         for (i in 0 until 6) baos.write(0)
-        baos.write(offsetSize) // offset int size (1 or 2)
-        baos.write(1)          // object ref size (1)
-        // 8 bytes: number of objects (5)
-        for (i in 0 until 7) baos.write(0)
-        baos.write(offsets.size)
-        // 8 bytes: top object index (0)
-        for (i in 0 until 8) baos.write(0)
-        // 8 bytes: offset table offset
-        val trailerBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
-        trailerBuf.putLong(offsetTableOffset.toLong())
-        baos.write(trailerBuf.array())
+        baos.write(offsetSize)
+        baos.write(1) // ref size = 1
+        val numObjsBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(offsets.size.toLong()).array()
+        baos.write(numObjsBuf)
+        val topObjBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(0L).array()
+        baos.write(topObjBuf)
+        val tableOffBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(offsetTableOffset.toLong()).array()
+        baos.write(tableOffBuf)
 
         return baos.toByteArray()
     }
