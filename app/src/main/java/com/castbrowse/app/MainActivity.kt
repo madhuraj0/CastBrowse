@@ -845,13 +845,17 @@ class MainActivity : ComponentActivity() {
                 headers["Cookie"] = cookies
             }
 
-            // Always route through LocalMediaProxy so receiver never leaks IP to internet and bypasses 403
+            // For AirPlay: if it is a standard web stream without strict cookies/referer, send the direct URL
+            // so the receiver (Mac / Apple TV / Android) plays directly via native hardware/codecs and ATS compliance.
+            // If custom cookies or referer are present, or for DLNA/WebReceiver, route through LocalMediaProxy.
             val proxiedUrl = if (videoUrl.contains("/local?id=")) {
+                videoUrl
+            } else if (device.protocol == CastProtocol.AIRPLAY && (headers["Cookie"].isNullOrEmpty() && headers["Referer"].isNullOrEmpty())) {
                 videoUrl
             } else {
                 LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
             }
-            android.util.Log.d("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort (${device.protocol}) -> $proxiedUrl")
+            android.util.Log.i("MainActivity", "Casting stream to ${device.ipAddress}:$targetPort (${device.protocol}) -> $proxiedUrl")
             val cleanTitle = videoTitle.ifEmpty { MediaExtractorClient.extractFilenameFromUrl(videoUrl) }
             val result = CastSessionManager.play(
                 device = device,

@@ -234,6 +234,81 @@ object LocalMediaProxy {
         return "http://$ip:$proxyPort/proxy?url=$encodedUrl"
     }
 
+    fun openUpstreamConnection(urlStr: String): HttpURLConnection {
+        val url = URL(urlStr)
+        val context = appContext
+        if (context != null) {
+            try {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                if (cm != null) {
+                    val wifiNetwork = cm.allNetworks.firstOrNull { net ->
+                        val caps = cm.getNetworkCapabilities(net)
+                        caps != null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
+                                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    }
+                    if (wifiNetwork != null) {
+                        return wifiNetwork.openConnection(url) as HttpURLConnection
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed binding upstream to Wi-Fi network: ${e.message}")
+            }
+        }
+        return url.openConnection() as HttpURLConnection
+    }
+
+    fun resolveDnsFallback(host: String): String? {
+        if (host.matches(Regex("""^\d+\.\d+\.\d+\.\d+$"""))) return host
+        return try {
+            java.net.DatagramSocket().use { s ->
+                s.soTimeout = 2000
+                val packet = java.io.ByteArrayOutputStream().apply {
+                    write(byteArrayOf(0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00))
+                    for (part in host.split('.')) {
+                        val b = part.toByteArray(Charsets.US_ASCII)
+                        write(b.size)
+                        write(b)
+                    }
+                    write(byteArrayOf(0x00, 0x00, 0x01, 0x00, 0x01))
+                }.toByteArray()
+                val dest = java.net.InetSocketAddress("8.8.8.8", 53)
+                s.send(java.net.DatagramPacket(packet, packet.size, dest))
+                val buf = ByteArray(512)
+                val resp = java.net.DatagramPacket(buf, buf.size)
+                s.receive(resp)
+                val data = resp.data
+                val ancount = ((data[6].toInt() and 0xFF) shl 8) or (data[7].toInt() and 0xFF)
+                if (ancount == 0) return null
+                var idx = 12
+                while (idx < data.size && data[idx].toInt() != 0) {
+                    idx += 1 + (data[idx].toInt() and 0xFF)
+                }
+                idx += 5
+                for (i in 0 until ancount) {
+                    if (idx >= data.size) break
+                    if ((data[idx].toInt() and 0xC0) == 0xC0) {
+                        idx += 2
+                    } else {
+                        while (idx < data.size && data[idx].toInt() != 0) idx += 1 + (data[idx].toInt() and 0xFF)
+                        idx += 1
+                    }
+                    if (idx + 10 > data.size) break
+                    val atype = ((data[idx].toInt() and 0xFF) shl 8) or (data[idx + 1].toInt() and 0xFF)
+                    val rdlen = ((data[idx + 8].toInt() and 0xFF) shl 8) or (data[idx + 9].toInt() and 0xFF)
+                    idx += 10
+                    if (atype == 1 && rdlen == 4 && idx + 4 <= data.size) {
+                        return "${data[idx].toInt() and 0xFF}.${data[idx + 1].toInt() and 0xFF}.${data[idx + 2].toInt() and 0xFF}.${data[idx + 3].toInt() and 0xFF}"
+                    }
+                    idx += rdlen
+                }
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "DNS fallback lookup failed for $host: ${e.message}")
+            null
+        }
+    }
+
     private fun handleConnection(socket: Socket) {
         try {
             val reader = socket.getInputStream().bufferedReader()
@@ -260,6 +335,7 @@ object LocalMediaProxy {
             if (parts.size < 2) return
             val method = parts[0].uppercase()
             val path = parts[1]
+            Log.i(TAG, "Incoming: $method $path from ${socket.inetAddress?.hostAddress}")
 
             if (path == "/tv" || path == "/tv/") {
                 socket.inetAddress?.hostAddress?.let { clientIp ->
@@ -401,7 +477,7 @@ object LocalMediaProxy {
             var responseCode = 0
             
             while (redirectCount < 5) {
-                val conn = URL(redirectUrl).openConnection() as HttpURLConnection
+                var conn = openUpstreamConnection(redirectUrl)
                 conn.requestMethod = if (method == "HEAD") "HEAD" else "GET"
                 conn.connectTimeout = 10000
                 conn.readTimeout = 20000
@@ -409,6 +485,7 @@ object LocalMediaProxy {
 
                 // Attach registered custom headers (Referer, Cookie, User-Agent, Origin, Sec-Fetch-*) to bypass 403
                 val registeredHeaders = getHeadersForUrl(redirectUrl) ?: getHeadersForUrl(targetUrl)
+                val regLowerKeys = registeredHeaders?.keys?.map { it.lowercase() }?.toSet() ?: emptySet()
                 if (registeredHeaders != null) {
                     for ((key, value) in registeredHeaders) {
                         val lower = key.lowercase()
@@ -421,7 +498,8 @@ object LocalMediaProxy {
                 for ((key, value) in clientHeaders) {
                     val lowerKey = key.lowercase()
                     if (lowerKey == "host" || lowerKey == "connection" || lowerKey == "range") continue
-                    if (registeredHeaders?.containsKey(key) != true) {
+                    if (lowerKey == "user-agent" && regLowerKeys.contains("user-agent")) continue
+                    if (!regLowerKeys.contains(lowerKey)) {
                         conn.setRequestProperty(key, value)
                     }
                 }
@@ -462,6 +540,7 @@ object LocalMediaProxy {
                     conn.connect()
                     responseCode = conn.responseCode
                 } catch (e: Exception) {
+                    Log.e(TAG, "Proxy error connecting to $redirectUrl: ${e.javaClass.simpleName} - ${e.message}", e)
                     val out = socket.getOutputStream()
                     out.write("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n".toByteArray())
                     out.flush()
@@ -583,6 +662,9 @@ object LocalMediaProxy {
                 
                 val headerValue = connection.getHeaderField(headerKey)
                 out.write("$headerKey: $headerValue\r\n".toByteArray())
+            }
+            if (connection.getHeaderField("Accept-Ranges") == null) {
+                out.write("Accept-Ranges: bytes\r\n".toByteArray())
             }
             out.write("Connection: close\r\n\r\n".toByteArray())
             

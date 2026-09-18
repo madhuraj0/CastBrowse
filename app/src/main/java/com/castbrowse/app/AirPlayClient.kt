@@ -170,6 +170,13 @@ object AirPlayClient {
                 throw Exception("AirPlay /play failed with HTTP $lastErrorCode: $lastErrorMessage")
             }
 
+            // Explicitly set rate=1.0 so receiver begins playback immediately
+            try {
+                sendRate(ipAddress, activePort, 1.0f)
+            } catch (e: Exception) {
+                Log.w(TAG, "AirPlay: rate=1 notice: ${e.message}")
+            }
+
             CastSessionManager.isMediaPlaying = true
             CastSessionManager.playbackState = 1
             CastSessionManager.playbackPositionSeconds = 0.0
@@ -286,12 +293,53 @@ object AirPlayClient {
         }
     }
 
-    private fun startPolling(host: String, port: Int, sessionId: String, onDisconnected: (() -> Unit)?) {
+    private fun sendStop(host: String, port: Int): Boolean {
+        return try {
+            val builder = Request.Builder()
+                .url("http://$host:$port/stop")
+                .addHeader("User-Agent", "MediaControl/1.0")
+                .addHeader("Connection", "close")
+                .post("".toRequestBody())
+            activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
+            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun sendScrub(host: String, port: Int, position: Double): Boolean {
+        return try {
+            val builder = Request.Builder()
+                .url("http://$host:$port/scrub?position=$position")
+                .addHeader("User-Agent", "MediaControl/1.0")
+                .addHeader("Connection", "close")
+                .post("".toRequestBody())
+            activeSessionId?.let { builder.addHeader("X-Apple-Session-ID", it) }
+            httpClient.newCall(builder.build()).execute().use { it.isSuccessful || it.code == 200 }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun sendVolume(host: String, port: Int, db: Float): Boolean {
+        val clamped = ((db + 30.0f) / 30.0f).coerceIn(0f, 1f)
+        return sendVolumeParam(host, port, "volume", String.format(java.util.Locale.US, "%.6f", db)) ||
+                 sendVolumeParam(host, port, "value", clamped.toString())
+    }
+
+    private fun startPolling(
+        host: String,
+        port: Int,
+        sessionId: String,
+        onDisconnected: (() -> Unit)? = null
+    ) {
         stopPolling()
         pollJob = CoroutineScope(Dispatchers.IO).launch {
             var consecutiveNetworkFails = 0
+            var pollCycle = 0
             while (CastSessionManager.isMediaPlaying) {
                 delay(1000)
+                pollCycle++
                 try {
                     val builder = Request.Builder()
                         .url("http://$host:$port/scrub")
@@ -307,22 +355,33 @@ object AirPlayClient {
                             val body = resp.body?.string() ?: ""
                             parseScrubResponse(body)
                         } else if (resp.code == 404 || resp.code == 403) {
-                            // Receiver terminated session
                             consecutiveNetworkFails++
                         } else {
-                            // 500 or other transient buffering state - do not treat as network failure
-                            consecutiveNetworkFails = 0
+                            // On 500 (buffering or modern receiver), query /playback-info as well
+                            try {
+                                val infoReq = Request.Builder()
+                                    .url("http://$host:$port/playback-info")
+                                    .addHeader("User-Agent", "MediaControl/1.0")
+                                    .addHeader("X-Apple-Session-ID", sessionId)
+                                    .addHeader("Connection", "close")
+                                    .get()
+                                httpClient.newCall(infoReq.build()).execute().use { infoResp ->
+                                    if (infoResp.isSuccessful) {
+                                        consecutiveNetworkFails = 0
+                                    } else if (infoResp.code == 404 || infoResp.code == 403) {
+                                        consecutiveNetworkFails++
+                                    }
+                                }
+                            } catch (e: Exception) {}
                         }
                     }
                 } catch (e: IOException) {
                     consecutiveNetworkFails++
                 } catch (e: Exception) {
-                    // Non-network exceptions
                 }
 
-                // Disconnect only if receiver network socket is consistently unreachable (15+ seconds)
-                if (consecutiveNetworkFails > 15) {
-                    Log.w(TAG, "AirPlay: Receiver unreachable for 15s, triggering disconnect")
+                if (consecutiveNetworkFails > 20) {
+                    Log.w(TAG, "AirPlay: Receiver unreachable for 20s, triggering disconnect")
                     stopPolling()
                     onDisconnected?.invoke()
                     break
