@@ -238,20 +238,25 @@ object LocalMediaProxy {
         val url = URL(urlStr)
         val context = appContext
         if (context != null) {
-            try {
-                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
-                if (cm != null) {
-                    val wifiNetwork = cm.allNetworks.firstOrNull { net ->
-                        val caps = cm.getNetworkCapabilities(net)
-                        caps != null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
-                                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            val isVpn = NetworkDiagnostics.isVpnActive(context)
+            if (!isVpn) {
+                try {
+                    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+                    if (cm != null) {
+                        val wifiNetwork = cm.allNetworks.firstOrNull { net ->
+                            val caps = cm.getNetworkCapabilities(net)
+                            caps != null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
+                                    caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        }
+                        if (wifiNetwork != null) {
+                            return wifiNetwork.openConnection(url) as HttpURLConnection
+                        }
                     }
-                    if (wifiNetwork != null) {
-                        return wifiNetwork.openConnection(url) as HttpURLConnection
-                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed binding upstream to Wi-Fi network: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed binding upstream to Wi-Fi network: ${e.message}")
+            } else {
+                Log.d(TAG, "VPN is active: preserving VPN route for leak-proof streaming of geo/IP-locked content")
             }
         }
         return url.openConnection() as HttpURLConnection
@@ -780,78 +785,352 @@ object LocalMediaProxy {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CastBrowse Web Receiver</title>
+<title>CastBrowse TV Receiver</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
-  body, html { width: 100%; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
+  body, html { width: 100%; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
   #player-container { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; }
   video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 
-  #idle-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at center, #181c24 0%, #08090c 100%); z-index: 10; text-align: center; padding: 24px; }
-  .logo { font-size: 3.2rem; font-weight: 900; letter-spacing: -1px; background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px; }
-  .status-pill { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 9999px; padding: 6px 18px; font-size: 1rem; color: #93c5fd; margin-bottom: 24px; }
-  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 12px #22c55e; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.85); } }
-  .instructions { color: rgba(255,255,255,0.7); font-size: 1.25rem; max-width: 600px; line-height: 1.6; }
-  .instructions b { color: #fff; }
+  /* Apple TV / AirPlay Ambient Standby Screen */
+  #idle-screen {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 50% 35%, #182030 0%, #0c0f17 55%, #050608 100%);
+    z-index: 10;
+    text-align: center;
+    padding: 32px;
+  }
+  .hero-icon-wrapper {
+    width: 96px;
+    height: 96px;
+    border-radius: 28px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 24px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+  .hero-icon-wrapper svg {
+    width: 48px;
+    height: 48px;
+    color: #38bdf8;
+  }
+  .receiver-title {
+    font-size: 2.8rem;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #f8fafc;
+    margin-bottom: 8px;
+  }
+  .receiver-subtitle {
+    font-size: 1.15rem;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.65);
+    max-width: 540px;
+    line-height: 1.5;
+    margin-bottom: 28px;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 9999px;
+    padding: 8px 22px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #4ade80;
+    margin-bottom: 28px;
+    letter-spacing: 0.2px;
+  }
+  .status-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #22c55e;
+    box-shadow: 0 0 12px #22c55e;
+    animation: pulse 2s infinite ease-in-out;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.85); }
+  }
+  .url-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.75);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .url-badge svg {
+    width: 16px;
+    height: 16px;
+    color: #38bdf8;
+  }
 
   /* Buffering Spinner */
-  #spinner { display: none; position: absolute; width: 64px; height: 64px; border: 5px solid rgba(255,255,255,0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 1s linear infinite; z-index: 15; pointer-events: none; }
+  #spinner {
+    display: none;
+    position: absolute;
+    width: 60px;
+    height: 60px;
+    border: 4px solid rgba(255, 255, 255, 0.15);
+    border-top-color: #0071e3;
+    border-radius: 50%;
+    animation: spin 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    z-index: 15;
+    pointer-events: none;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* OSD Container */
-  #osd-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 32px 40px; pointer-events: none; opacity: 0; transition: opacity 0.35s ease; z-index: 20; background: linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 22%, transparent 70%, rgba(0,0,0,0.85) 100%); }
+  /* OSD Overlay */
+  #osd-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 36px 44px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 20;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 24%, transparent 65%, rgba(0,0,0,0.85) 100%);
+  }
   #osd-overlay.show { opacity: 1; pointer-events: auto; }
 
   /* Top Bar */
   .osd-top { display: flex; justify-content: space-between; align-items: center; }
-  .top-left { display: flex; align-items: center; gap: 14px; }
-  .brand-badge { font-weight: 800; font-size: 1.1rem; color: #60a5fa; background: rgba(96,165,250,0.15); border: 1px solid rgba(96,165,250,0.3); padding: 4px 12px; border-radius: 8px; }
-  #osd-title { font-size: 1.35rem; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70vw; }
-  .top-right { display: flex; align-items: center; gap: 10px; }
+  .top-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(24, 24, 28, 0.75);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 8px 18px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+  .top-pill svg { width: 18px; height: 18px; color: #38bdf8; flex-shrink: 0; }
+  #osd-title {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: #f8fafc;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 65vw;
+  }
 
-  /* Bottom Controls Box */
-  .osd-bottom { display: flex; flex-direction: column; gap: 14px; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 16px 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  /* Bottom Floating Pill Player (Apple TV / AirPlay Style) */
+  .osd-bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    background: rgba(22, 22, 26, 0.82);
+    backdrop-filter: blur(32px) saturate(190%);
+    -webkit-backdrop-filter: blur(32px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 28px;
+    padding: 16px 24px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+    max-width: 1000px;
+    width: 100%;
+    margin: 0 auto;
+  }
 
-  /* Seek / Progress Bar */
-  .seek-bar-container { position: relative; width: 100%; height: 14px; display: flex; align-items: center; cursor: pointer; border-radius: 7px; outline: none; }
-  .seek-track { position: relative; width: 100%; height: 6px; background: rgba(255,255,255,0.2); border-radius: 4px; overflow: hidden; transition: height 0.15s; }
-  .seek-bar-container:hover .seek-track, .seek-bar-container:focus .seek-track { height: 9px; }
-  .seek-buffer { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: rgba(255,255,255,0.35); border-radius: 4px; }
-  .seek-progress { position: absolute; left: 0; top: 0; bottom: 0; width: 0%; background: linear-gradient(90deg, #38bdf8, #818cf8); border-radius: 4px; }
-  .seek-thumb { position: absolute; left: 0%; top: 50%; transform: translate(-50%, -50%); width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px rgba(0,0,0,0.6); opacity: 0; transition: opacity 0.15s; pointer-events: none; }
-  .seek-bar-container:hover .seek-thumb, .seek-bar-container:focus .seek-thumb { opacity: 1; }
+  /* Timeline / Seek Bar */
+  .seek-bar-container {
+    position: relative;
+    width: 100%;
+    height: 14px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    border-radius: 7px;
+    outline: none;
+  }
+  .seek-track {
+    position: relative;
+    width: 100%;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.22);
+    border-radius: 4px;
+    overflow: hidden;
+    transition: height 0.15s ease;
+  }
+  .seek-bar-container:hover .seek-track, .seek-bar-container:focus .seek-track {
+    height: 8px;
+  }
+  .seek-buffer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    background: rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+  }
+  .seek-progress {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    background: linear-gradient(90deg, #0071e3, #38bdf8);
+    border-radius: 4px;
+  }
+  .seek-thumb {
+    position: absolute;
+    left: 0%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+  .seek-bar-container:hover .seek-thumb, .seek-bar-container:focus .seek-thumb {
+    opacity: 1;
+  }
 
   /* Controls Row */
-  .controls-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .controls-left, .controls-right { display: flex; align-items: center; gap: 12px; }
+  .controls-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .controls-left, .controls-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
 
-  /* TV Buttons with High-Visibility D-Pad Focus */
-  .ctrl-btn { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 1.05rem; font-weight: 600; border-radius: 12px; height: 44px; min-width: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; outline: none; transition: all 0.2s ease; }
-  .ctrl-btn:hover { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.3); }
+  /* Apple TV Style Circular Glass Buttons */
+  .ctrl-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #f8fafc;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    flex-shrink: 0;
+  }
+  .ctrl-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+    stroke: currentColor;
+  }
+  .ctrl-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.25);
+    transform: scale(1.04);
+  }
+
+  /* Primary Play Button */
+  .ctrl-btn-primary {
+    background: #0071e3;
+    border-color: #38bdf8;
+    width: 48px;
+    height: 48px;
+    box-shadow: 0 4px 16px rgba(0, 113, 227, 0.4);
+  }
+  .ctrl-btn-primary:hover {
+    background: #0077ed;
+    border-color: #60a5fa;
+  }
+  .ctrl-btn-primary svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* Pill-shaped button (for Aspect Ratio) */
+  .ctrl-btn-pill {
+    border-radius: 20px;
+    padding: 0 14px;
+    width: auto;
+    gap: 6px;
+    font-size: 0.88rem;
+    font-weight: 600;
+  }
+  .ctrl-btn-pill svg {
+    width: 16px;
+    height: 16px;
+  }
 
   /* Remote D-Pad Focus Indicator for 10-foot TV experience */
   .ctrl-btn:focus, .seek-bar-container:focus, .remote-focusable:focus {
     outline: none !important;
-    background: rgba(56, 189, 248, 0.25) !important;
-    border-color: #38bdf8 !important;
-    box-shadow: 0 0 0 3px #38bdf8, 0 0 20px rgba(56, 189, 248, 0.6) !important;
-    transform: scale(1.08);
+    background: rgba(0, 113, 227, 0.35) !important;
+    border-color: #0071e3 !important;
+    box-shadow: 0 0 0 3px #0071e3, 0 0 24px rgba(0, 113, 227, 0.65) !important;
+    transform: scale(1.1) !important;
   }
 
-  .ctrl-btn-primary { background: #0284c7; border-color: #38bdf8; font-size: 1.25rem; min-width: 52px; height: 46px; }
-  .ctrl-btn-primary:hover { background: #0369a1; }
-
-  #osd-time { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.95rem; color: #cbd5e1; padding: 0 6px; }
-  .remote-hint { font-size: 0.78rem; color: rgba(255,255,255,0.45); text-align: center; }
+  #osd-time {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.75);
+    padding: 0 8px;
+    letter-spacing: 0.5px;
+  }
+  .remote-hint {
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: center;
+    letter-spacing: 0.2px;
+  }
 </style>
 </head>
 <body>
 <div id="player-container">
+  <!-- AirPlay / TV Ambient Standby Screen -->
   <div id="idle-screen">
-    <div class="logo">CastBrowse</div>
+    <div class="hero-icon-wrapper">
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="6" width="40" height="26" rx="5"/>
+        <polygon points="24,24 16,36 32,36" fill="currentColor"/>
+      </svg>
+    </div>
     <div class="status-pill"><div class="status-dot"></div> Web Receiver Ready</div>
-    <p class="instructions">Keep this browser tab open on your TV.<br>In CastBrowse, select <b>Web Receiver</b> or cast any video link to start watching.</p>
+    <div class="receiver-title">CastBrowse TV</div>
+    <p class="receiver-subtitle">Ready to stream media directly from your phone, tablet, or browser.</p>
+    <div class="url-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="7" width="20" height="15" rx="2" ry="2"/>
+        <polyline points="17 2 12 7 7 2"/>
+      </svg>
+      <span id="standby-url">http://.../tv</span>
+    </div>
   </div>
 
   <div id="spinner"></div>
@@ -861,20 +1140,25 @@ object LocalMediaProxy {
   <!-- Complete TV Receiver Player UI (OSD) -->
   <div id="osd-overlay">
     <div class="osd-top">
-      <div class="top-left">
-        <div class="brand-badge">CastBrowse TV</div>
+      <div class="top-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
+          <polygon points="12 15 8 21 16 21" fill="currentColor"/>
+        </svg>
         <div id="osd-title">Media Stream</div>
       </div>
-      <div class="top-right">
-        <button id="btn-fullscreen-top" class="ctrl-btn remote-focusable" tabindex="0" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
-          <span id="fs-top-icon">⛶</span> Fullscreen
-        </button>
-      </div>
+      <button id="btn-fullscreen-top" class="ctrl-btn remote-focusable" tabindex="0" title="Toggle Fullscreen" aria-label="Toggle Fullscreen">
+        <span id="fs-top-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+          </svg>
+        </span>
+      </button>
     </div>
 
     <div class="osd-bottom">
       <!-- Seek Bar -->
-      <div id="seek-container" class="seek-bar-container remote-focusable" tabindex="0" role="slider" aria-label="Video seek slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="seek-container" class="seek-bar-container remote-focusable" tabindex="0" role="slider" aria-label="Seek slider" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
         <div class="seek-track">
           <div id="seek-buffer" class="seek-buffer"></div>
           <div id="seek-progress" class="seek-progress"></div>
@@ -882,35 +1166,63 @@ object LocalMediaProxy {
         <div id="seek-thumb" class="seek-thumb"></div>
       </div>
 
-      <!-- Control Buttons Row -->
+      <!-- Controls Row -->
       <div class="controls-row">
         <div class="controls-left">
+          <!-- Play / Pause -->
           <button id="btn-play" class="ctrl-btn ctrl-btn-primary remote-focusable" tabindex="0" title="Play / Pause (OK / Space)" aria-label="Play / Pause">
-            <span id="play-icon">▶</span>
+            <span id="play-icon">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M8 5.14v13.72a1 1 0 001.5.86l11-6.86a1 1 0 000-1.72l-11-6.86A1 1 0 008 5.14z"/>
+              </svg>
+            </span>
           </button>
+          <!-- Rewind 10s -->
           <button id="btn-rw" class="ctrl-btn remote-focusable" tabindex="0" title="Rewind 10s (Left Arrow)" aria-label="Rewind 10s">
-            ⏪ 10s
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 4V1L8 5l4 4V6a7 7 0 1 1-6.9 8.1"/>
+              <text x="12" y="14.5" text-anchor="middle" font-size="7" font-weight="bold" fill="currentColor" stroke="none" font-family="system-ui">10</text>
+            </svg>
           </button>
+          <!-- Forward 10s -->
           <button id="btn-ff" class="ctrl-btn remote-focusable" tabindex="0" title="Forward 10s (Right Arrow)" aria-label="Forward 10s">
-            10s ⏩
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 4V1l4 4-4 4V6a7 7 0 1 0 6.9 8.1"/>
+              <text x="12" y="14.5" text-anchor="middle" font-size="7" font-weight="bold" fill="currentColor" stroke="none" font-family="system-ui">10</text>
+            </svg>
           </button>
           <div id="osd-time">00:00 / 00:00</div>
         </div>
 
         <div class="controls-right">
-          <button id="btn-aspect" class="ctrl-btn remote-focusable" tabindex="0" title="Cycle Aspect Ratio" aria-label="Cycle Aspect Ratio">
-            📐 <span id="aspect-label">Fit</span>
+          <!-- Aspect Ratio Toggle -->
+          <button id="btn-aspect" class="ctrl-btn ctrl-btn-pill remote-focusable" tabindex="0" title="Cycle Aspect Ratio" aria-label="Cycle Aspect Ratio">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="18" height="14" rx="2"/>
+              <path d="M3 12h18M12 5v14"/>
+            </svg>
+            <span id="aspect-label">Fit</span>
           </button>
+          <!-- Mute / Unmute -->
           <button id="btn-mute" class="ctrl-btn remote-focusable" tabindex="0" title="Mute / Unmute" aria-label="Mute / Unmute">
-            <span id="mute-icon">🔊</span>
+            <span id="mute-icon">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              </svg>
+            </span>
           </button>
+          <!-- Fullscreen Toggle -->
           <button id="btn-fullscreen" class="ctrl-btn remote-focusable" tabindex="0" title="Toggle Fullscreen (F)" aria-label="Toggle Fullscreen">
-            <span id="fs-icon">⛶</span>
+            <span id="fs-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+              </svg>
+            </span>
           </button>
         </div>
       </div>
 
-      <div class="remote-hint">Remote: OK: Play/Pause • Arrows: Seek/Nav • F / Green: Fullscreen • Back: Hide UI</div>
+      <div class="remote-hint">Remote: OK: Play/Pause • Arrows: Seek/Navigate • F / Green: Fullscreen • Back: Hide UI</div>
     </div>
   </div>
 </div>
@@ -924,6 +1236,10 @@ object LocalMediaProxy {
   const osdOverlay = document.getElementById('osd-overlay');
   const osdTitle = document.getElementById('osd-title');
   const osdTime = document.getElementById('osd-time');
+  const standbyUrl = document.getElementById('standby-url');
+  if (standbyUrl) {
+    standbyUrl.textContent = window.location.href;
+  }
 
   const seekContainer = document.getElementById('seek-container');
   const seekProgress = document.getElementById('seek-progress');
@@ -943,6 +1259,14 @@ object LocalMediaProxy {
   const btnFullscreenTop = document.getElementById('btn-fullscreen-top');
   const fsTopIcon = document.getElementById('fs-top-icon');
 
+  // SVG Icon Templates
+  const SVG_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5.14v13.72a1 1 0 001.5.86l11-6.86a1 1 0 000-1.72l-11-6.86A1 1 0 008 5.14z"/></svg>';
+  const SVG_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>';
+  const SVG_SPEAKER = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>';
+  const SVG_MUTED = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27l4.73 4.73H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>';
+  const SVG_FS_ENTER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+  const SVG_FS_EXIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>';
+
   let currentUrl = '';
   let lastCommandVersion = -1;
   let osdTimeout = null;
@@ -954,13 +1278,12 @@ object LocalMediaProxy {
     clearTimeout(osdTimeout);
     if (!video.paused && video.src && !video.ended) {
       osdTimeout = setTimeout(() => {
-        // If an element within OSD has active focus from TV remote, do not hide abruptly
         if (!osdOverlay.contains(document.activeElement) || document.activeElement === document.body) {
           osdOverlay.classList.remove('show');
         } else {
           osdTimeout = setTimeout(() => osdOverlay.classList.remove('show'), 5000);
         }
-      }, 4500);
+      }, 4000);
     }
   }
 
@@ -1011,7 +1334,7 @@ object LocalMediaProxy {
 
   function toggleMute() {
     video.muted = !video.muted;
-    muteIcon.textContent = video.muted ? '🔇' : '🔊';
+    muteIcon.innerHTML = video.muted ? SVG_MUTED : SVG_SPEAKER;
   }
 
   function cycleAspect() {
@@ -1053,8 +1376,9 @@ object LocalMediaProxy {
 
   function updateFullscreenUi() {
     const fs = isFullscreen();
-    fsIcon.textContent = fs ? '🗗' : '⛶';
-    fsTopIcon.textContent = fs ? '🗗' : '⛶';
+    const iconHtml = fs ? SVG_FS_EXIT : SVG_FS_ENTER;
+    fsIcon.innerHTML = iconHtml;
+    fsTopIcon.innerHTML = iconHtml;
     btnFullscreen.title = fs ? 'Exit Fullscreen' : 'Enter Fullscreen';
     btnFullscreenTop.title = fs ? 'Exit Fullscreen' : 'Enter Fullscreen';
   }
@@ -1083,12 +1407,12 @@ object LocalMediaProxy {
   // Video State Updates
   video.addEventListener('timeupdate', updateProgressBar);
   video.addEventListener('play', () => {
-    playIcon.textContent = '❚❚';
+    playIcon.innerHTML = SVG_PAUSE;
     idleScreen.style.display = 'none';
     showOsd();
   });
   video.addEventListener('pause', () => {
-    playIcon.textContent = '▶';
+    playIcon.innerHTML = SVG_PLAY;
     showOsd();
   });
   video.addEventListener('waiting', () => { spinner.style.display = 'block'; });

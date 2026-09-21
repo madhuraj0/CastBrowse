@@ -155,6 +155,18 @@ object DlnaClient {
     }
 
     private suspend fun setAVTransportUri(controlUrl: String, mediaUrl: String, title: String): Boolean {
+        // Pre-stop any ongoing playback so the receiver's AVTransport state machine is not locked (e.g. error 705)
+        try {
+            sendSoapAction(
+                url = controlUrl,
+                serviceType = AV_TRANSPORT_SERVICE,
+                actionName = "Stop",
+                args = mapOf("InstanceID" to "0")
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "DLNA pre-stop ignored: ${e.message}")
+        }
+
         val mimeType = when {
             mediaUrl.contains(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
             mediaUrl.contains(".mpd", ignoreCase = true) -> "application/dash+xml"
@@ -174,7 +186,9 @@ object DlnaClient {
             else -> "video/mp4"
         }
         val didlMetadata = buildDidlMetadata(mediaUrl, title, mimeType)
-        return sendSoapAction(
+
+        // Attempt 1: Standard SetAVTransportURI with DIDL-Lite metadata
+        var success = sendSoapAction(
             url = controlUrl,
             serviceType = AV_TRANSPORT_SERVICE,
             actionName = "SetAVTransportURI",
@@ -184,6 +198,22 @@ object DlnaClient {
                 "CurrentURIMetaData" to didlMetadata
             )
         )
+
+        // Attempt 2: Fallback without metadata if receiver rejected DIDL XML (common on smart TVs and Fire TV apps)
+        if (!success) {
+            Log.w(TAG, "DLNA: SetAVTransportURI with metadata failed, retrying with empty metadata...")
+            success = sendSoapAction(
+                url = controlUrl,
+                serviceType = AV_TRANSPORT_SERVICE,
+                actionName = "SetAVTransportURI",
+                args = mapOf(
+                    "InstanceID" to "0",
+                    "CurrentURI" to mediaUrl,
+                    "CurrentURIMetaData" to ""
+                )
+            )
+        }
+        return success
     }
 
     private fun buildDidlMetadata(url: String, title: String, mimeType: String): String {
@@ -239,7 +269,8 @@ object DlnaClient {
                 if (response.isSuccessful) {
                     true
                 } else {
-                    Log.w(TAG, "SOAP action $actionName failed with code ${response.code}: ${response.message}")
+                    val errorBody = response.body?.string()?.take(500)
+                    Log.w(TAG, "SOAP action $actionName failed with code ${response.code}: ${response.message}, body: $errorBody")
                     false
                 }
             }

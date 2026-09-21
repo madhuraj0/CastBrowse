@@ -7,7 +7,9 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
@@ -336,12 +338,12 @@ object SpeedDialManager {
     private const val KEY_SHORTCUTS = "speed_dial_shortcuts"
 
     val DEFAULT_SHORTCUTS = listOf(
-        SpeedDialItem("1", "YouTube", "https://m.youtube.com", "▶️", isDefault = true, accentColor = 0xFFEF4444),
-        SpeedDialItem("2", "Twitch", "https://m.twitch.tv", "🟣", isDefault = true, accentColor = 0xFFA855F7),
-        SpeedDialItem("3", "Reddit", "https://reddit.com", "🤖", isDefault = true, accentColor = 0xFFF97316),
-        SpeedDialItem("4", "Vimeo", "https://vimeo.com", "🎬", isDefault = true, accentColor = 0xFF06B6D4),
-        SpeedDialItem("5", "SoundCloud", "https://m.soundcloud.com", "🎵", isDefault = true, accentColor = 0xFFF59E0B),
-        SpeedDialItem("6", "Internet Archive", "https://archive.org", "🏛️", isDefault = true, accentColor = 0xFF10B981)
+        SpeedDialItem("1", "YouTube", "https://m.youtube.com", "play", isDefault = true, accentColor = 0xFFEF4444),
+        SpeedDialItem("2", "Twitch", "https://m.twitch.tv", "game", isDefault = true, accentColor = 0xFFA855F7),
+        SpeedDialItem("3", "Reddit", "https://reddit.com", "forum", isDefault = true, accentColor = 0xFFF97316),
+        SpeedDialItem("4", "Vimeo", "https://vimeo.com", "movie", isDefault = true, accentColor = 0xFF06B6D4),
+        SpeedDialItem("5", "SoundCloud", "https://m.soundcloud.com", "music", isDefault = true, accentColor = 0xFFF59E0B),
+        SpeedDialItem("6", "Internet Archive", "https://archive.org", "folder", isDefault = true, accentColor = 0xFF10B981)
     )
 
     fun loadShortcuts(context: Context): List<SpeedDialItem> {
@@ -727,8 +729,122 @@ fun FloatingGlassmorphicBottomBar(
 }
 
 /**
+ * Crisp vector icon or clean domain monogram for Speed Dial tiles.
+ * Guarantees high visual fidelity with zero naive emojis.
+ */
+@Composable
+fun SpeedDialTileIcon(
+    item: SpeedDialItem,
+    isAddTile: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (isAddTile) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = "Add Shortcut",
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = modifier.size(24.dp)
+        )
+        return
+    }
+
+    val urlLower = item.url.lowercase()
+    val titleLower = item.title.lowercase()
+    val emoji = item.iconEmoji.lowercase()
+
+    when {
+        urlLower.contains("youtube.com") || urlLower.contains("youtu.be") || titleLower == "youtube" || emoji in listOf("▶️", "play", "youtube", "video") -> {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = item.title,
+                tint = Color(0xFFEF4444),
+                modifier = modifier.size(26.dp)
+            )
+        }
+        urlLower.contains("twitch.tv") || titleLower == "twitch" || emoji in listOf("🟣", "twitch", "game", "gaming") -> {
+            Icon(
+                imageVector = AppIcons.Gamepad,
+                contentDescription = item.title,
+                tint = Color(0xFFA855F7),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        urlLower.contains("reddit.com") || titleLower == "reddit" || emoji in listOf("🤖", "reddit", "forum", "chat") -> {
+            Icon(
+                imageVector = AppIcons.Forum,
+                contentDescription = item.title,
+                tint = Color(0xFFFF5700),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        urlLower.contains("vimeo.com") || titleLower == "vimeo" || emoji in listOf("🎬", "vimeo", "movie", "film") -> {
+            Icon(
+                imageVector = AppIcons.Movie,
+                contentDescription = item.title,
+                tint = Color(0xFF06B6D4),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        urlLower.contains("soundcloud.com") || titleLower == "soundcloud" || emoji in listOf("🎵", "soundcloud", "music", "audio") -> {
+            Icon(
+                imageVector = AppIcons.Music,
+                contentDescription = item.title,
+                tint = Color(0xFFF59E0B),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        urlLower.contains("archive.org") || titleLower.contains("archive") || emoji in listOf("🏛️", "archive", "folder") -> {
+            Icon(
+                imageVector = AppIcons.FolderOpen,
+                contentDescription = item.title,
+                tint = Color(0xFF10B981),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        emoji in listOf("📺", "tv") -> {
+            Icon(
+                imageVector = AppIcons.Tv,
+                contentDescription = item.title,
+                tint = Color(0xFF3B82F6),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        emoji in listOf("⭐", "star", "favorite") -> {
+            Icon(
+                imageVector = AppIcons.Star,
+                contentDescription = item.title,
+                tint = Color(0xFFFBBF24),
+                modifier = modifier.size(24.dp)
+            )
+        }
+        emoji in listOf("🌐", "browser", "web") -> {
+            Icon(
+                imageVector = AppIcons.Browser,
+                contentDescription = item.title,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = modifier.size(24.dp)
+            )
+        }
+        else -> {
+            val letter = item.title.trim().firstOrNull()?.uppercaseChar()
+                ?: item.url.removePrefix("https://").removePrefix("http://").removePrefix("www.").firstOrNull()?.uppercaseChar()
+                ?: 'W'
+            Text(
+                text = letter.toString(),
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                ),
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+/**
  * Material 3 Expressive Speed Dial Home Screen
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SpeedDialHomeScreen(
     onOpenUrl: (String) -> Unit,
@@ -893,7 +1009,7 @@ fun SpeedDialHomeScreen(
                     id = "__add_new__",
                     title = "Add",
                     url = "",
-                    iconEmoji = "➕",
+                    iconEmoji = "add",
                     accentColor = 0xFF71717A
                 )
             )
@@ -910,13 +1026,21 @@ fun SpeedDialHomeScreen(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .tactilePress {
-                                    if (isAddTile) {
-                                        showAddDialog = true
-                                    } else {
-                                        onOpenUrl(item.url)
+                                .clip(RoundedCornerShape(16.dp))
+                                .combinedClickable(
+                                    onClick = {
+                                        if (isAddTile) {
+                                            showAddDialog = true
+                                        } else {
+                                            onOpenUrl(item.url)
+                                        }
+                                    },
+                                    onLongClick = {
+                                        if (!isAddTile) {
+                                            itemToEdit = item
+                                        }
                                     }
-                                },
+                                ),
                             contentAlignment = Alignment.TopCenter
                         ) {
                             Column(
@@ -939,10 +1063,7 @@ fun SpeedDialHomeScreen(
                                     modifier = Modifier.size(54.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = item.iconEmoji,
-                                            fontSize = 22.sp
-                                        )
+                                        SpeedDialTileIcon(item = item, isAddTile = isAddTile)
                                     }
                                 }
 
@@ -957,27 +1078,6 @@ fun SpeedDialHomeScreen(
                                     overflow = TextOverflow.Ellipsis,
                                     textAlign = TextAlign.Center
                                 )
-                            }
-
-                            // Edit button for all speed dial shortcuts (including pre-added)
-                            if (!isAddTile) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
-                                    modifier = Modifier
-                                        .size(20.dp)
-                                        .align(Alignment.TopEnd)
-                                        .clickable { itemToEdit = item }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "Edit Shortcut",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -1010,16 +1110,24 @@ fun SpeedDialHomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val engines = listOf(
-                    Triple("DuckDuckGo", "https://duckduckgo.com", "🦆"),
-                    Triple("Google", "https://www.google.com", "🔍"),
-                    Triple("Bing", "https://www.bing.com", "🌐"),
-                    Triple("Brave", "https://search.brave.com", "🦁"),
-                    Triple("Wikipedia", "https://en.wikipedia.org", "📚")
+                    Triple("DuckDuckGo", "https://duckduckgo.com", AppIcons.Browser),
+                    Triple("Google", "https://www.google.com", Icons.Default.Search),
+                    Triple("Bing", "https://www.bing.com", AppIcons.Browser),
+                    Triple("Brave", "https://search.brave.com", AppIcons.Browser),
+                    Triple("Wikipedia", "https://en.wikipedia.org", AppIcons.FolderOpen)
                 )
-                engines.forEach { (name, url, icon) ->
+                engines.forEach { (name, url, iconVector) ->
                     AssistChip(
                         onClick = { onOpenUrl(url) },
-                        label = { Text("$icon $name") },
+                        label = { Text(name, style = MaterialTheme.typography.labelMedium) },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = iconVector,
+                                contentDescription = name,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
                         shape = RoundedCornerShape(12.dp)
                     )
                 }
@@ -1113,8 +1221,18 @@ fun AddShortcutDialog(
 ) {
     var title by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("https://") }
-    var emoji by remember { mutableStateOf("⭐") }
-    val emojiOptions = listOf("⭐", "🎬", "🎵", "📺", "🎮", "📻", "⚡", "🌐", "🍿")
+    var selectedIconKey by remember { mutableStateOf("browser") }
+
+    val iconOptions = listOf(
+        Triple("browser", AppIcons.Browser, "Web"),
+        Triple("play", Icons.Default.PlayArrow, "Video"),
+        Triple("movie", AppIcons.Movie, "Movie"),
+        Triple("music", AppIcons.Music, "Music"),
+        Triple("game", AppIcons.Gamepad, "Game"),
+        Triple("forum", AppIcons.Forum, "Forum"),
+        Triple("tv", AppIcons.Tv, "TV"),
+        Triple("star", AppIcons.Star, "Star")
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1122,11 +1240,11 @@ fun AddShortcutDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text("Add Bookmark Shortcut", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Title") },
+                    label = { Text("Title / Name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1138,7 +1256,7 @@ fun AddShortcutDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    text = "Select Icon:",
+                    text = "Select Icon Category:",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1146,17 +1264,23 @@ fun AddShortcutDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
-                    emojiOptions.forEach { opt ->
+                    iconOptions.forEach { (key, vector, label) ->
+                        val isSelected = selectedIconKey == key
                         Surface(
-                            shape = CircleShape,
-                            color = if (emoji == opt) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            border = if (emoji == opt) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
                             modifier = Modifier
-                                .size(36.dp)
-                                .clickable { emoji = opt }
+                                .size(40.dp)
+                                .clickable { selectedIconKey = key }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(opt, fontSize = 16.sp)
+                                Icon(
+                                    imageVector = vector,
+                                    contentDescription = label,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
@@ -1174,7 +1298,7 @@ fun AddShortcutDialog(
                             id = java.util.UUID.randomUUID().toString(),
                             title = title.trim(),
                             url = finalUrl.trim(),
-                            iconEmoji = emoji,
+                            iconEmoji = selectedIconKey,
                             isDefault = false
                         )
                         onAdd(newItem)
@@ -1194,7 +1318,7 @@ fun AddShortcutDialog(
 }
 
 /**
- * Dialog to edit or remove any speed dial shortcut (including pre-added presets)
+ * Dialog to edit, rename, or remove any speed dial shortcut (including pre-added presets)
  */
 @Composable
 fun EditShortcutDialog(
@@ -1205,20 +1329,30 @@ fun EditShortcutDialog(
 ) {
     var title by remember { mutableStateOf(item.title) }
     var url by remember { mutableStateOf(item.url) }
-    var emoji by remember { mutableStateOf(item.iconEmoji) }
-    val emojiOptions = listOf("▶️", "🟣", "🤖", "🎬", "🎵", "🏛️", "⭐", "📺", "🎮", "📻", "⚡", "🌐", "🍿")
+    var selectedIconKey by remember { mutableStateOf(item.iconEmoji) }
+
+    val iconOptions = listOf(
+        Triple("browser", AppIcons.Browser, "Web"),
+        Triple("play", Icons.Default.PlayArrow, "Video"),
+        Triple("movie", AppIcons.Movie, "Movie"),
+        Triple("music", AppIcons.Music, "Music"),
+        Triple("game", AppIcons.Gamepad, "Game"),
+        Triple("forum", AppIcons.Forum, "Forum"),
+        Triple("tv", AppIcons.Tv, "TV"),
+        Triple("star", AppIcons.Star, "Star")
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        title = { Text("Edit Shortcut", fontWeight = FontWeight.Bold) },
+        title = { Text("Rename / Edit Shortcut", fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("Title") },
+                    label = { Text("Title / Rename") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1230,7 +1364,7 @@ fun EditShortcutDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 Text(
-                    text = "Select Icon:",
+                    text = "Select Icon Category:",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1238,17 +1372,23 @@ fun EditShortcutDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.horizontalScroll(rememberScrollState())
                 ) {
-                    emojiOptions.forEach { opt ->
+                    iconOptions.forEach { (key, vector, label) ->
+                        val isSelected = selectedIconKey == key || (key == "play" && (selectedIconKey == "▶️" || selectedIconKey == "video")) || (key == "music" && (selectedIconKey == "🎵" || selectedIconKey == "audio")) || (key == "game" && selectedIconKey == "🟣") || (key == "forum" && selectedIconKey == "🤖") || (key == "movie" && selectedIconKey == "🎬") || (key == "star" && selectedIconKey == "⭐")
                         Surface(
-                            shape = CircleShape,
-                            color = if (emoji == opt) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            border = if (emoji == opt) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
                             modifier = Modifier
-                                .size(36.dp)
-                                .clickable { emoji = opt }
+                                .size(40.dp)
+                                .clickable { selectedIconKey = key }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(opt, fontSize = 16.sp)
+                                Icon(
+                                    imageVector = vector,
+                                    contentDescription = label,
+                                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
@@ -1265,7 +1405,7 @@ fun EditShortcutDialog(
                         val updated = item.copy(
                             title = title.trim(),
                             url = finalUrl.trim(),
-                            iconEmoji = emoji
+                            iconEmoji = selectedIconKey
                         )
                         onSave(updated)
                     }

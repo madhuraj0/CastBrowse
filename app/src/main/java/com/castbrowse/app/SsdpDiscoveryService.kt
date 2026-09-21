@@ -263,6 +263,7 @@ class SsdpDiscoveryService(private val context: Context) {
             val request = Request.Builder().url(locationUrl).build()
             val response = httpClient.newCall(request).execute()
             if (!response.isSuccessful) return null
+            val appUrlHeader = response.header("Application-URL") ?: response.header("X-Application-URL")
             val xml = response.body?.string() ?: return null
 
             val friendlyName = extractXmlValue(xml, "friendlyName") ?: return null
@@ -272,21 +273,21 @@ class SsdpDiscoveryService(private val context: Context) {
             val host = uri.host ?: return null
             val port = if (uri.port > 0) uri.port else 80
 
-            // Extract AVTransport controlURL
-            val avControlRelative = extractControlUrlForService(xml, "urn:schemas-upnp-org:service:AVTransport:1")
+            // Extract AVTransport controlURL (matches AVTransport:1, AVTransport:2, etc.)
+            val avControlRelative = extractControlUrlForService(xml, "AVTransport")
             val fullControlUrl = avControlRelative?.let { resolveUrl(locationUrl, it) }
 
             // Extract RenderingControl controlURL (optional, for volume)
-            val renderingControlRelative = extractControlUrlForService(xml, "urn:schemas-upnp-org:service:RenderingControl:1")
+            val renderingControlRelative = extractControlUrlForService(xml, "RenderingControl")
             val fullRenderingUrl = renderingControlRelative?.let { resolveUrl(locationUrl, it) }
 
-            val appUrl = discoveredAppUrl ?: extractXmlValue(xml, "Application-URL")
+            val appUrl = discoveredAppUrl ?: appUrlHeader ?: extractXmlValue(xml, "Application-URL")
 
             val protocol = when {
                 fullControlUrl != null -> CastProtocol.DLNA
                 appUrl != null -> CastProtocol.DIAL
-                else -> CastProtocol.DLNA
-            }
+                else -> null
+            } ?: return null
 
             CastDevice(
                 name = friendlyName,
@@ -313,18 +314,20 @@ class SsdpDiscoveryService(private val context: Context) {
         return xml.substring(start + startTag.length, end).trim()
     }
 
-    private fun extractControlUrlForService(xml: String, serviceType: String): String? {
-        var idx = xml.indexOf(serviceType)
+    private fun extractControlUrlForService(xml: String, serviceTypePattern: String): String? {
+        var idx = xml.indexOf(serviceTypePattern, ignoreCase = true)
         while (idx != -1) {
+            // Find start of <service> block preceding the matched pattern
+            val serviceBlockStart = xml.lastIndexOf("<service>", idx).let { if (it == -1) xml.lastIndexOf("<service ", idx) else it }
             val serviceBlockEnd = xml.indexOf("</service>", idx)
-            if (serviceBlockEnd != -1) {
-                val serviceBlock = xml.substring(idx, serviceBlockEnd)
+            if (serviceBlockStart != -1 && serviceBlockEnd != -1 && serviceBlockEnd > serviceBlockStart) {
+                val serviceBlock = xml.substring(serviceBlockStart, serviceBlockEnd)
                 val controlUrl = extractXmlValue(serviceBlock, "controlURL")
                 if (!controlUrl.isNullOrEmpty()) {
                     return controlUrl
                 }
             }
-            idx = xml.indexOf(serviceType, idx + serviceType.length)
+            idx = xml.indexOf(serviceTypePattern, idx + serviceTypePattern.length, ignoreCase = true)
         }
         return null
     }

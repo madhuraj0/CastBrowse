@@ -44,6 +44,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -65,6 +67,12 @@ class CastWizardActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Block screenshots and screen recording on the setup wizard (contains device IP/port info)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         LocalMediaProxy.start()
         discoveryService = SsdpDiscoveryService(this)
 
@@ -78,6 +86,47 @@ class CastWizardActivity : ComponentActivity() {
             }
         }
         startDeviceDiscovery()
+        handleTestIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleTestIntent(intent)
+    }
+
+    private fun handleTestIntent(intent: Intent?) {
+        val action = intent?.getStringExtra("EXTRA_TEST_ACTION")
+        if (action == "STOP") {
+            CastPlaybackService.stop(this@CastWizardActivity)
+            CoroutineScope(Dispatchers.IO).launch {
+                CastSessionManager.stop()
+            }
+            return
+        } else if (action == "PAUSE") {
+            CoroutineScope(Dispatchers.IO).launch {
+                CastSessionManager.pause()
+            }
+            return
+        } else if (action == "RESUME") {
+            CoroutineScope(Dispatchers.IO).launch {
+                CastSessionManager.resume()
+            }
+            return
+        }
+
+        val testIp = intent?.getStringExtra("EXTRA_TEST_IP")
+        if (!testIp.isNullOrEmpty()) {
+            val testPort = intent.getIntExtra("EXTRA_TEST_PORT", AirPlayClient.AIRPLAY_DEFAULT_PORT)
+            val testName = intent.getStringExtra("EXTRA_TEST_NAME") ?: "AirPlay Receiver"
+            val testProto = when (intent.getStringExtra("EXTRA_TEST_PROTO")?.uppercase()) {
+                "FCAST" -> CastProtocol.FCAST
+                "DLNA" -> CastProtocol.DLNA
+                else -> CastProtocol.AIRPLAY
+            }
+            val dev = CastDevice(testName, testIp, testPort, protocol = testProto)
+            playTestStream(dev)
+        }
     }
 
     private fun startDeviceDiscovery() {
@@ -215,13 +264,15 @@ class CastWizardActivity : ComponentActivity() {
     }
 
     private fun playTestStream(device: CastDevice) {
-        lifecycleScope.launch {
+        CoroutineScope(Dispatchers.Main).launch {
             CastSessionManager.isCasting = true
             Toast.makeText(this@CastWizardActivity, "Connecting to ${device.name}...", Toast.LENGTH_SHORT).show()
             
             val targetPort = if (device.port > 0) device.port else CastSessionManager.customFcastPort
-            val res = CastSessionManager.play(device, TEST_VIDEO_URL, "${device.name} Test Stream") {
-                lifecycleScope.launch {
+            val proxiedTestUrl = LocalMediaProxy.getProxyUrl(TEST_VIDEO_URL, receiverIp = device.ipAddress)
+            val res = CastSessionManager.play(device, proxiedTestUrl, "${device.name} Test Stream") {
+                CoroutineScope(Dispatchers.Main).launch {
+                    CastPlaybackService.stop(this@CastWizardActivity)
                     CastSessionManager.isMediaPlaying = false
                     CastSessionManager.activeMediaUrl = null
                 }
@@ -234,6 +285,14 @@ class CastWizardActivity : ComponentActivity() {
                 CastSessionManager.isMediaPlaying = true
                 CastSessionManager.activeMediaUrl = TEST_VIDEO_URL
                 CastSessionManager.saveRecentIp(this@CastWizardActivity, device.ipAddress)
+                CastPlaybackService.start(
+                    context = this@CastWizardActivity,
+                    title = "${device.name} Test Stream",
+                    deviceName = device.name,
+                    ip = device.ipAddress,
+                    port = targetPort,
+                    url = proxiedTestUrl
+                )
                 Toast.makeText(this@CastWizardActivity, "Test video playing on ${device.name}!", Toast.LENGTH_LONG).show()
             }.onFailure { e ->
                 Toast.makeText(this@CastWizardActivity, "Test connection failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
@@ -378,6 +437,10 @@ class CastWizardActivity : ComponentActivity() {
                                     }
                                     IconButton(
                                         onClick = { 
+                                            CastPlaybackService.stop(context)
+                                            CoroutineScope(Dispatchers.IO).launch {
+                                                CastSessionManager.stop()
+                                            }
                                             CastSessionManager.castingDevice = null 
                                             CastSessionManager.isMediaPlaying = false
                                             CastSessionManager.activeMediaUrl = null
@@ -450,140 +513,7 @@ class CastWizardActivity : ComponentActivity() {
                     }
                 }
 
-                // 2. Smart TV Web Receiver Card (/tv)
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .refractiveGlass(
-                                shape = RoundedCornerShape(20.dp),
-                                elevation = 6.dp
-                            )
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.secondary),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(WebIcon, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(22.dp))
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Smart TV Web Receiver", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                    Text("Works on any TV or console browser (webOS, Tizen, PlayStation, Xbox, FireTV)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .refractiveGlass(
-                                        shape = RoundedCornerShape(12.dp),
-                                        elevation = 2.dp
-                                    )
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        tvUrl,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(onClick = {
-                                        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clip.setPrimaryClip(ClipData.newPlainText("TV URL", tvUrl))
-                                        Toast.makeText(context, "URL copied: $tvUrl", Toast.LENGTH_SHORT).show()
-                                    }) {
-                                        Icon(Icons.Default.Share, contentDescription = "Copy TV URL")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 3. Hotspot / Travel Mode Card
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .refractiveGlass(
-                                shape = RoundedCornerShape(20.dp),
-                                elevation = 6.dp,
-                                glowColor = if (isHotspot) MaterialTheme.colorScheme.secondary else null
-                            )
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        TetheringIcon,
-                                        contentDescription = null,
-                                        tint = Color.Unspecified,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Hotspot / Travel Mode", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                                    Text(
-                                        if (isHotspot) "Hotspot Active (Phone Gateway: $hotspotIp)" else "Cast in hotels without Wi-Fi router by enabling your phone hotspot.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (isHotspot) {
-                                    Button(
-                                        onClick = {
-                                            lifecycleScope.launch {
-                                                Toast.makeText(context, "Scanning hotspot devices...", Toast.LENGTH_SHORT).show()
-                                                val found = NetworkDiagnostics.scanHotspotSubnet()
-                                                found.forEach { dev ->
-                                                    if (discoveredDevices.none { it.ipAddress == dev.ipAddress }) {
-                                                        discoveredDevices.add(dev)
-                                                    }
-                                                }
-                                                Toast.makeText(context, "Found ${found.size} receiver(s)", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text("Scan Hotspot")
-                                    }
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        try {
-                                            val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "Open Hotspot in Android Settings", Toast.LENGTH_SHORT).show()
-                                        }
-                                    },
-                                    modifier = if (isHotspot) Modifier else Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Hotspot Settings")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 4. Discovered Devices & TVs
+                // 2. Discovered Devices & TVs
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -697,6 +627,139 @@ class CastWizardActivity : ComponentActivity() {
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.primary
                                     )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 3. Smart TV Web Receiver Card (/tv)
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp
+                            )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp, glowColor = MaterialTheme.colorScheme.secondary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(WebIcon, contentDescription = null, tint = Color.Unspecified, modifier = Modifier.size(22.dp))
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Smart TV Web Receiver", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                    Text("Works on any TV or console browser (webOS, Tizen, PlayStation, Xbox, FireTV)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .refractiveGlass(
+                                        shape = RoundedCornerShape(12.dp),
+                                        elevation = 2.dp
+                                    )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        tvUrl,
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(onClick = {
+                                        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clip.setPrimaryClip(ClipData.newPlainText("TV URL", tvUrl))
+                                        Toast.makeText(context, "URL copied: $tvUrl", Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Icon(Icons.Default.Share, contentDescription = "Copy TV URL")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 4. Hotspot / Travel Mode Card
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .refractiveGlass(
+                                shape = RoundedCornerShape(20.dp),
+                                elevation = 6.dp,
+                                glowColor = if (isHotspot) MaterialTheme.colorScheme.secondary else null
+                            )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .refractiveGlass(shape = CircleShape, elevation = 2.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        TetheringIcon,
+                                        contentDescription = null,
+                                        tint = Color.Unspecified,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Hotspot / Travel Mode", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                    Text(
+                                        if (isHotspot) "Hotspot Active (Phone Gateway: $hotspotIp)" else "Cast in hotels without Wi-Fi router by enabling your phone hotspot.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (isHotspot) {
+                                    Button(
+                                        onClick = {
+                                             lifecycleScope.launch {
+                                                Toast.makeText(context, "Scanning hotspot devices...", Toast.LENGTH_SHORT).show()
+                                                val found = NetworkDiagnostics.scanHotspotSubnet()
+                                                found.forEach { dev ->
+                                                    if (discoveredDevices.none { it.ipAddress == dev.ipAddress }) {
+                                                        discoveredDevices.add(dev)
+                                                    }
+                                                }
+                                                Toast.makeText(context, "Found ${found.size} receiver(s)", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Scan Hotspot")
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        try {
+                                            val intent = Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Open Hotspot in Android Settings", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = if (isHotspot) Modifier else Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Hotspot Settings")
                                 }
                             }
                         }

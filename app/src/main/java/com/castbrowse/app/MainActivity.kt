@@ -502,6 +502,13 @@ class MainActivity : ComponentActivity() {
     private var onThemeResumeCallback: (() -> Unit)? = null
 
     data class BrowserTab(val id: Int, val title: String, val url: String)
+    data class BrowserContextMenuState(
+        val url: String,
+        val title: String,
+        val isLink: Boolean,
+        val isImage: Boolean,
+        val isCurrentPage: Boolean
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -845,12 +852,9 @@ class MainActivity : ComponentActivity() {
                 headers["Cookie"] = cookies
             }
 
-            // For AirPlay: if it is a standard web stream without strict cookies, send the direct URL
-            // so the receiver (Mac / Apple TV / Android) plays directly via native hardware/codecs and ATS compliance.
-            // If custom cookies are present, or for DLNA/WebReceiver, route through LocalMediaProxy.
+            // Route through LocalMediaProxy for all remote streams to attach headers/cookies
+            // and preserve leak-proof mobile VPN tunneling for geo/IP-locked content.
             val proxiedUrl = if (videoUrl.contains("/local?id=")) {
-                videoUrl
-            } else if (device.protocol == CastProtocol.AIRPLAY && headers["Cookie"].isNullOrEmpty()) {
                 videoUrl
             } else {
                 LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
@@ -970,6 +974,94 @@ class MainActivity : ComponentActivity() {
             extractedVideos.clear()
         }
 
+        val openInNewTab: (String, Boolean) -> Unit = { url, inBackground ->
+            val nextId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
+            val cleanTitle = MediaExtractorClient.extractFilenameFromUrl(url).ifBlank { "New Tab" }
+            tabs.add(BrowserTab(nextId, cleanTitle, url))
+            if (!inBackground) {
+                val oldBundle = Bundle()
+                webView?.saveState(oldBundle)
+                tabStates[activeTabId] = oldBundle
+                tabVideos[activeTabId] = extractedVideos.toList()
+
+                activeTabId = nextId
+                extractedVideos.clear()
+            } else {
+                Toast.makeText(context, "Opened in background tab", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        val fetchStreamsFromUrl: (String) -> Unit = { targetUrl ->
+            lifecycleScope.launch {
+                Toast.makeText(this@MainActivity, "Scanning for media streams...", Toast.LENGTH_SHORT).show()
+                if (isDirectVideoLink(targetUrl)) {
+                    val filename = MediaExtractorClient.extractFilenameFromUrl(targetUrl)
+                    val direct = ExtractedVideo(url = targetUrl, title = filename)
+                    if (extractedVideos.none { it.url == targetUrl }) {
+                        extractedVideos.add(direct)
+                        tabVideos[activeTabId] = extractedVideos.toList()
+                    }
+                    Toast.makeText(this@MainActivity, "Direct stream detected: $filename", Toast.LENGTH_SHORT).show()
+                } else {
+                    withContext(Dispatchers.IO) {
+                        try {
+                            val req = okhttp3.Request.Builder()
+                                .url(targetUrl)
+                                .header("User-Agent", webView?.settings?.userAgentString ?: "")
+                                .build()
+                            val resp = MediaExtractorClient.httpClient.newCall(req).execute()
+                            if (resp.isSuccessful) {
+                                val html = resp.body?.string() ?: ""
+                                val discovered = mutableListOf<ExtractedVideo>()
+
+                                val urlRegex = Regex("""(https?://[^\s"'<>\\]+\.(?:m3u8|mpd|mp4|webm|mkv)(?:\?[^\s"'<>\\]*)?)""", RegexOption.IGNORE_CASE)
+                                urlRegex.findAll(html).forEach { match ->
+                                    val streamUrl = match.value
+                                    if (!MediaExtractorClient.isSegmentUrl(streamUrl) && discovered.none { it.url == streamUrl }) {
+                                        discovered.add(ExtractedVideo(url = streamUrl, title = MediaExtractorClient.extractFilenameFromUrl(streamUrl)))
+                                    }
+                                }
+
+                                val relRegex = Regex("""(?:src|source)=["'](/[^"']+\.(?:m3u8|mpd|mp4|webm|mkv)(?:\?[^"']*)?)["']""", RegexOption.IGNORE_CASE)
+                                val baseUri = android.net.Uri.parse(targetUrl)
+                                relRegex.findAll(html).forEach { match ->
+                                    val path = match.groupValues[1]
+                                    val absUrl = "${baseUri.scheme}://${baseUri.host}$path"
+                                    if (!MediaExtractorClient.isSegmentUrl(absUrl) && discovered.none { it.url == absUrl }) {
+                                        discovered.add(ExtractedVideo(url = absUrl, title = MediaExtractorClient.extractFilenameFromUrl(absUrl)))
+                                    }
+                                }
+
+                                withContext(Dispatchers.Main) {
+                                    if (discovered.isNotEmpty()) {
+                                        var addedCount = 0
+                                        discovered.forEach { video ->
+                                            if (extractedVideos.none { it.url == video.url }) {
+                                                extractedVideos.add(video)
+                                                addedCount++
+                                            }
+                                        }
+                                        tabVideos[activeTabId] = extractedVideos.toList()
+                                        Toast.makeText(this@MainActivity, "Discovered $addedCount media stream(s)!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(this@MainActivity, "No direct media streams found on this page.", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(this@MainActivity, "Failed to load link (HTTP ${resp.code})", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@MainActivity, "Error fetching stream: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         val closeTab: (BrowserTab) -> Unit = { tab ->
             val idx = tabs.indexOf(tab)
             val closingId = tab.id
@@ -1000,6 +1092,9 @@ class MainActivity : ComponentActivity() {
         var findQuery by remember { mutableStateOf("") }
         var findMatchIndex by remember { mutableStateOf(0) }
         var findMatchTotal by remember { mutableStateOf(0) }
+
+        var contextMenuState by remember { mutableStateOf<BrowserContextMenuState?>(null) }
+        var showRenameTabDialog by remember { mutableStateOf<BrowserTab?>(null) }
 
         var currentNavTab by remember { mutableStateOf(0) }
         LaunchedEffect(requestedNavTab) {
@@ -2270,20 +2365,40 @@ class MainActivity : ComponentActivity() {
 
                             setOnLongClickListener {
                                 val hr = hitTestResult
-                                val extra = hr.extra
-                                if (hr.type == WebView.HitTestResult.SRC_ANCHOR_TYPE || hr.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                                    if (extra != null && !MediaExtractorClient.isSegmentUrl(extra)) {
-                                        lifecycleScope.launch {
-                                            if (extractedVideos.none { it.url == extra }) {
-                                                val filename = MediaExtractorClient.extractFilenameFromUrl(extra)
-                                                val video = ExtractedVideo(url = extra, title = filename)
-                                                extractedVideos.add(video)
-                                                Toast.makeText(ctx, "Extracted: $filename", Toast.LENGTH_SHORT).show()
-                                            }
-                                        }
-                                    }
+                                if (hr.type == WebView.HitTestResult.EDIT_TEXT_TYPE) {
+                                    return@setOnLongClickListener false
                                 }
-                                false
+
+                                val currentUrl = url ?: activeTab.url
+                                val isAnchor = hr.type == WebView.HitTestResult.SRC_ANCHOR_TYPE || 
+                                               hr.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+                                val isImg = hr.type == WebView.HitTestResult.IMAGE_TYPE || 
+                                            hr.type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE
+
+                                val targetUrl = when {
+                                    isAnchor -> hr.extra ?: currentUrl
+                                    isImg -> hr.extra ?: currentUrl
+                                    else -> currentUrl
+                                }
+
+                                if (targetUrl.isNullOrBlank() || targetUrl == "about:blank") {
+                                    return@setOnLongClickListener false
+                                }
+
+                                val displayTitle = when {
+                                    isAnchor -> MediaExtractorClient.extractFilenameFromUrl(targetUrl).ifBlank { targetUrl }
+                                    isImg -> "Image: " + MediaExtractorClient.extractFilenameFromUrl(targetUrl)
+                                    else -> (title ?: activeTab.title).ifBlank { targetUrl }
+                                }
+
+                                contextMenuState = BrowserContextMenuState(
+                                    url = targetUrl,
+                                    title = displayTitle,
+                                    isLink = isAnchor,
+                                    isImage = isImg,
+                                    isCurrentPage = !isAnchor && !isImg
+                                )
+                                true
                             }
 
                             addJavascriptInterface(
@@ -2883,6 +2998,231 @@ class MainActivity : ComponentActivity() {
                     showUserAgentDialog = false
                     val presetName = UserAgentManager.PRESETS.firstOrNull { it.id == newMode }?.name ?: "Default"
                     Toast.makeText(context, "User-Agent switched to: $presetName", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+
+        // Browser Long-Press Context Menu (Available everywhere across web pages, links, and media)
+        if (contextMenuState != null) {
+            val menuState = contextMenuState!!
+            ModalBottomSheet(
+                onDismissRequest = { contextMenuState = null },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                dragHandle = {
+                    Surface(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        shape = CircleShape
+                    ) {
+                        Box(modifier = Modifier.size(width = 36.dp, height = 4.dp))
+                    }
+                }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 28.dp)
+                ) {
+                    // Header with title & URL
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (menuState.isImage) AppIcons.MediaLibrary else if (menuState.isLink) AppIcons.NewTab else AppIcons.Browser,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = menuState.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = menuState.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(vertical = 6.dp)
+                    )
+
+                    // 1. Open in New Tab
+                    BrowserContextMenuRow(
+                        icon = AppIcons.NewTab,
+                        title = "Open in New Tab",
+                        subtitle = "Open link in a new foreground tab",
+                        onClick = {
+                            openInNewTab(menuState.url, false)
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 2. Open in Background Tab
+                    BrowserContextMenuRow(
+                        icon = AppIcons.Browser,
+                        title = "Open in Background Tab",
+                        subtitle = "Keep current page open and load in background",
+                        onClick = {
+                            openInNewTab(menuState.url, true)
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 3. Fetch Stream / Extract
+                    BrowserContextMenuRow(
+                        icon = AppIcons.MediaLibrary,
+                        title = "Fetch Stream",
+                        subtitle = "Scan link for video and audio playback streams",
+                        onClick = {
+                            fetchStreamsFromUrl(menuState.url)
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 4. Cast to TV
+                    BrowserContextMenuRow(
+                        icon = AppIcons.Cast,
+                        title = "Cast to TV",
+                        subtitle = "Stream link directly to AirPlay, DLNA, or Web",
+                        onClick = {
+                            if (isDirectVideoLink(menuState.url)) {
+                                selectedVideoToCast = ExtractedVideo(
+                                    url = menuState.url,
+                                    title = MediaExtractorClient.extractFilenameFromUrl(menuState.url)
+                                )
+                                showCastDialog = true
+                            } else {
+                                fetchStreamsFromUrl(menuState.url)
+                                showCastDialog = true
+                            }
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 5. Copy Link Address
+                    BrowserContextMenuRow(
+                        icon = AppIcons.Copy,
+                        title = "Copy Link Address",
+                        subtitle = "Copy URL to system clipboard",
+                        onClick = {
+                            val clip = android.content.ClipData.newPlainText("URL", menuState.url)
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 6. Share Link
+                    BrowserContextMenuRow(
+                        icon = AppIcons.Share,
+                        title = "Share Link",
+                        subtitle = "Share URL via Android share sheet",
+                        onClick = {
+                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, menuState.url)
+                                putExtra(Intent.EXTRA_SUBJECT, menuState.title)
+                            }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share Link"))
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 7. Download
+                    BrowserContextMenuRow(
+                        icon = AppIcons.Download,
+                        title = if (menuState.isImage) "Download Image" else "Download Link / Media",
+                        subtitle = "Save file via Download Manager",
+                        onClick = {
+                            DownloadHelper.enqueueDownload(
+                                context = context,
+                                url = menuState.url,
+                                suggestedTitle = menuState.title
+                            )
+                            contextMenuState = null
+                        }
+                    )
+
+                    // 8. Rename Tab
+                    BrowserContextMenuRow(
+                        icon = Icons.Default.Edit,
+                        title = "Rename Tab",
+                        subtitle = "Change the title of this browser tab",
+                        onClick = {
+                            showRenameTabDialog = tabs.firstOrNull { it.id == activeTabId }
+                            contextMenuState = null
+                        }
+                    )
+                }
+            }
+        }
+
+        // Rename Tab Dialog
+        if (showRenameTabDialog != null) {
+            val currentTab = showRenameTabDialog!!
+            var renameText by remember { mutableStateOf(currentTab.title) }
+            AlertDialog(
+                onDismissRequest = { showRenameTabDialog = null },
+                shape = RoundedCornerShape(24.dp),
+                title = { Text("Rename Tab", fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = renameText,
+                            onValueChange = { renameText = it },
+                            label = { Text("Tab Title / Name") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (renameText.isNotBlank()) {
+                                val idx = tabs.indexOfFirst { it.id == currentTab.id }
+                                if (idx != -1) {
+                                    tabs[idx] = tabs[idx].copy(title = renameText.trim())
+                                }
+                                Toast.makeText(context, "Tab renamed to: ${renameText.trim()}", Toast.LENGTH_SHORT).show()
+                            }
+                            showRenameTabDialog = null
+                        },
+                        enabled = renameText.isNotBlank()
+                    ) {
+                        Text("Rename")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameTabDialog = null }) {
+                        Text("Cancel")
+                    }
                 }
             )
         }
@@ -5379,4 +5719,49 @@ private fun UserAgentPresetsDialog(
         shape = RoundedCornerShape(24.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     )
+}
+
+@Composable
+private fun BrowserContextMenuRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(22.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
 }

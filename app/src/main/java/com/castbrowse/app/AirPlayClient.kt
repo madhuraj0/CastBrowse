@@ -72,9 +72,10 @@ object AirPlayClient {
             val headerBuilder = StringBuilder()
             headerBuilder.append("$method $path HTTP/1.1\r\n")
             headerBuilder.append("Host: $host:$port\r\n")
-            headerBuilder.append("User-Agent: MediaControl/1.0\r\n")
+            headerBuilder.append("User-Agent: AirPlay/600.0\r\n")
             headerBuilder.append("X-Apple-Device-Name: CastBrowse\r\n")
             headerBuilder.append("X-Apple-Session-ID: $sessionId\r\n")
+            headerBuilder.append("X-Apple-Stream-ID: 1\r\n")
             headerBuilder.append("X-Apple-ProtocolVersion: 1\r\n")
             if (contentType != null) {
                 headerBuilder.append("Content-Type: $contentType\r\n")
@@ -142,63 +143,7 @@ object AirPlayClient {
         }
     }
 
-    /**
-     * Sends a pre-flight GET /info request to wake up the receiver, verify
-     * AirPlay service availability, and check for permission restrictions.
-     * Returns true if receiver is a modern Apple receiver (e.g. macOS Monterey+, Apple TV 4K / tvOS 10.2+)
-     * where /info succeeds with HTTP 200 and expects binary plist.
-     * Returns false if receiver is legacy or third-party (e.g. Android AirPlay, Kodi, UxPlay, Apple TV 2/3)
-     * where /info returns 404 or Server header is AirTunes and expects text/parameters.
-     */
-    private fun preflightCheck(host: String, port: Int): Boolean {
-        var isModernApple = false
-        try {
-            val request = Request.Builder()
-                .url("http://$host:$port/info")
-                .addHeader("User-Agent", "MediaControl/1.0")
-                .addHeader("Connection", "close")
-                .get()
-                .build()
 
-            val response = try {
-                httpClient.newCall(request).execute()
-            } catch (e: Exception) {
-                // If /info fails to connect or times out, try /server-info
-                val fallbackReq = Request.Builder()
-                    .url("http://$host:$port/server-info")
-                    .addHeader("User-Agent", "MediaControl/1.0")
-                    .addHeader("Connection", "close")
-                    .get()
-                    .build()
-                httpClient.newCall(fallbackReq).execute()
-            }
-
-            response.use { resp ->
-                if (resp.code == 403) {
-                    throw Exception(
-                        "AirPlay device rejected connection (HTTP 403 Forbidden). " +
-                        "If casting to a Mac or Apple TV, please check System Settings > General > " +
-                        "AirDrop & Handoff > AirPlay Receiver and ensure 'Allow AirPlay for' is set to " +
-                        "'Anyone on the same network' or 'Everyone' without a password."
-                    )
-                }
-                if (resp.isSuccessful || resp.code == 200) {
-                    val serverHeader = resp.header("Server") ?: ""
-                    val contentType = resp.header("Content-Type") ?: ""
-                    // macOS ControlCenter and tvOS 10.2+ respond with application/x-apple-binary-plist
-                    // even though Server header is AirTunes/9xx. Third-party servers (Android AirPlay, Kodi)
-                    // do not return binary plist for /info.
-                    if (contentType.contains("plist", ignoreCase = true) || !serverHeader.contains("AirTunes", ignoreCase = true)) {
-                        isModernApple = true
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            if (e.message?.contains("403") == true) throw e
-            Log.w(TAG, "AirPlay: Pre-flight check notice: ${e.message}")
-        }
-        return isModernApple
-    }
 
     suspend fun play(
         ipAddress: String,
@@ -218,17 +163,27 @@ object AirPlayClient {
 
             Log.i(TAG, "AirPlay: Playing '$title' ($url) on $ipAddress:$activePort (session: $sessionId)")
 
-            // Step 1: Pre-flight check & device classification
-            val isModernApple = preflightCheck(ipAddress, activePort)
-            isTargetModernApple = isModernApple
-            Log.i(TAG, "AirPlay: Target $ipAddress:$activePort classified as modernApple=$isModernApple")
-
-            // Step 2: Establish persistent session TCP socket
+            // Step 1: Establish persistent session TCP socket
             val socket = Socket()
-            socket.soTimeout = 8000
-            socket.connect(InetSocketAddress(ipAddress, activePort), 6000)
+            socket.soTimeout = 30000
+            socket.connect(InetSocketAddress(ipAddress, activePort), 8000)
             socket.tcpNoDelay = true
             sessionSocket = socket
+
+            // Step 2: Query /server-info on the persistent session socket
+            val (infoCode, _) = sendSessionRequest("GET", "/server-info")
+            if (infoCode == 403) {
+                closeSessionSocket()
+                throw Exception(
+                    "AirPlay connection forbidden (HTTP 403).\n" +
+                    "On your Mac, open System Settings > General > AirDrop & Handoff > AirPlay Receiver:\n" +
+                    "• Set 'Allow AirPlay for' to 'Anyone on the same network' or 'Everyone'\n" +
+                    "• Turn OFF 'Require password'"
+                )
+            }
+            val isModernApple = (infoCode in 200..299)
+            isTargetModernApple = isModernApple
+            Log.i(TAG, "AirPlay: Target $ipAddress:$activePort /server-info returned $infoCode (modernApple=$isModernApple)")
 
             var playSuccess = false
             var lastErrorCode = 0
@@ -250,9 +205,10 @@ object AirPlayClient {
                         true
                     } else if (code == 403) {
                         throw Exception(
-                            "AirPlay connection forbidden (HTTP 403). If casting to Mac or Apple TV, " +
-                            "ensure 'Allow AirPlay for' is set to 'Anyone on the same network' or 'Everyone' " +
-                            "in macOS System Settings > AirDrop & Handoff."
+                            "AirPlay connection forbidden (HTTP 403).\n" +
+                            "On your Mac, open System Settings > General > AirDrop & Handoff > AirPlay Receiver:\n" +
+                            "• Set 'Allow AirPlay for' to 'Anyone on the same network' or 'Everyone'\n" +
+                            "• Turn OFF 'Require password'"
                         )
                     } else {
                         false
@@ -280,9 +236,10 @@ object AirPlayClient {
                         true
                     } else if (code == 403) {
                         throw Exception(
-                            "AirPlay connection forbidden (HTTP 403). If casting to Mac or Apple TV, " +
-                            "ensure 'Allow AirPlay for' is set to 'Anyone on the same network' or 'Everyone' " +
-                            "in macOS System Settings > AirDrop & Handoff."
+                            "AirPlay connection forbidden (HTTP 403).\n" +
+                            "On your Mac, open System Settings > General > AirDrop & Handoff > AirPlay Receiver:\n" +
+                            "• Set 'Allow AirPlay for' to 'Anyone on the same network' or 'Everyone'\n" +
+                            "• Turn OFF 'Require password'"
                         )
                     } else {
                         false
@@ -393,57 +350,62 @@ object AirPlayClient {
         stopPolling()
         pollJob = CoroutineScope(Dispatchers.IO).launch {
             var consecutiveNetworkFails = 0
-            var apple500Count = 0
+            var modernAppleKeepAliveTicks = 0
             while (CastSessionManager.isMediaPlaying && sessionSocket?.isConnected == true) {
                 delay(1000)
                 try {
-                    if (isTargetModernApple && apple500Count >= 2) {
-                        // Modern Apple receivers (macOS Monterey+, tvOS 10.2+) reject /playback-info with 500
-                        // because they manage playback independently without RTSP polling.
-                        // Advance position locally to keep UI progress bar responsive and keep session socket open.
+                    if (isTargetModernApple) {
+                        // Modern Apple receivers (macOS Monterey+, tvOS 10.2+) manage playback via AVPlayer.
+                        // Advance position locally to keep UI progress bar responsive.
                         CastSessionManager.playbackPositionSeconds += 1.0
+                        modernAppleKeepAliveTicks++
+
+                        // Periodically send GET /server-info keep-alive to keep session alive and detect window close
+                        if (modernAppleKeepAliveTicks >= 5) {
+                            modernAppleKeepAliveTicks = 0
+                            val (code, _) = sendSessionRequest("GET", "/server-info")
+                            if (code in 200..299) {
+                                consecutiveNetworkFails = 0
+                            } else if (code == -1) {
+                                consecutiveNetworkFails += 2
+                            }
+                        }
+
+                        if (consecutiveNetworkFails >= 4) {
+                            Log.i(TAG, "AirPlay: Modern Apple receiver session closed by remote")
+                            stopPolling()
+                            closeSessionSocket()
+                            onDisconnected?.invoke()
+                            break
+                        }
                         continue
                     }
 
-                    val path = if (isTargetModernApple) "/playback-info" else "/scrub"
+                    val path = "/scrub"
                     val (code, bodyBytes) = sendSessionRequest("GET", path)
                     if (code in 200..299) {
                         consecutiveNetworkFails = 0
-                        apple500Count = 0
                         if (bodyBytes.isNotEmpty()) {
-                            val magic = if (bodyBytes.size >= 8) String(bodyBytes, 0, 8, Charsets.US_ASCII) else ""
-                            if (magic.startsWith("bplist00")) {
-                                parsePlaybackInfoResponse(bodyBytes)
-                            } else {
-                                parseScrubResponse(String(bodyBytes, Charsets.UTF_8))
-                            }
+                            parseScrubResponse(String(bodyBytes, Charsets.UTF_8))
                         }
                     } else if (code == 500 || code == 404) {
-                        if (isTargetModernApple) {
-                            apple500Count++
-                            // DO NOT treat HTTP 500 as network failure! Receiver is alive.
+                        val (infoCode, infoBytes) = sendSessionRequest("GET", "/playback-info")
+                        if (infoCode in 200..299) {
+                            isTargetModernApple = true
+                            consecutiveNetworkFails = 0
+                            if (infoBytes.isNotEmpty()) {
+                                val magic = if (infoBytes.size >= 8) String(infoBytes, 0, 8, Charsets.US_ASCII) else ""
+                                if (magic.startsWith("bplist00")) {
+                                    parsePlaybackInfoResponse(infoBytes)
+                                } else {
+                                    parseScrubResponse(String(infoBytes, Charsets.UTF_8))
+                                }
+                            }
+                        } else if (infoCode == 500) {
+                            isTargetModernApple = true
                             CastSessionManager.playbackPositionSeconds += 1.0
                         } else {
-                            val (infoCode, infoBytes) = sendSessionRequest("GET", "/playback-info")
-                            if (infoCode in 200..299) {
-                                isTargetModernApple = true
-                                consecutiveNetworkFails = 0
-                                apple500Count = 0
-                                if (infoBytes.isNotEmpty()) {
-                                    val magic = if (infoBytes.size >= 8) String(infoBytes, 0, 8, Charsets.US_ASCII) else ""
-                                    if (magic.startsWith("bplist00")) {
-                                        parsePlaybackInfoResponse(infoBytes)
-                                    } else {
-                                        parseScrubResponse(String(infoBytes, Charsets.UTF_8))
-                                    }
-                                }
-                            } else if (infoCode == 500) {
-                                isTargetModernApple = true
-                                apple500Count++
-                                CastSessionManager.playbackPositionSeconds += 1.0
-                            } else {
-                                consecutiveNetworkFails++
-                            }
+                            consecutiveNetworkFails++
                         }
                     } else if (code == -1 || code == 403) {
                         consecutiveNetworkFails++
@@ -605,10 +567,10 @@ object AirPlayClient {
 
     /**
      * Creates an Apple binary property list (bplist00) containing AirPlay stream parameters:
-     *   Content-Location (String), Start-Position (String %.6f), X-Apple-Session-ID (String).
+     *   Content-Location (String), Start-Position (Real 8-byte Double), X-Apple-Session-ID (String), rate (Real 8-byte Double = 1.0).
      *
      * Keys are strictly sorted in lexicographical ASCII order as required by Apple's CFPropertyList binary parser:
-     *   'Content-Location' ('C') < 'Start-Position' ('S') < 'X-Apple-Session-ID' ('X').
+     *   'Content-Location' ('C' 67) < 'Start-Position' ('S' 83) < 'X-Apple-Session-ID' ('X' 88) < 'rate' ('r' 114).
      *
      * Fully compatible with modern macOS (Monterey, Ventura, Sonoma, Sequoia) AVPlayer and tvOS receivers.
      */
@@ -639,12 +601,17 @@ object AirPlayClient {
             baos.write(b)
         }
 
+        fun writeDouble(d: Double) {
+            offsets.add(baos.size())
+            baos.write(0x23)
+            val buf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(d).array()
+            baos.write(buf)
+        }
+
         // 8-byte header: "bplist00"
         baos.write("bplist00".toByteArray(Charsets.US_ASCII))
 
-        val keys = listOf("Content-Location", "Start-Position", "X-Apple-Session-ID")
-        val formattedPos = String.format(java.util.Locale.US, "%.6f", startPosition)
-        val values = listOf(url, formattedPos, sessionId)
+        val keys = listOf("Content-Location", "Start-Position", "X-Apple-Session-ID", "rate")
         val count = keys.size
 
         // Object 0: Dictionary with `count` items
@@ -659,9 +626,10 @@ object AirPlayClient {
         }
 
         // Values (indices count+1..2*count)
-        for (v in values) {
-            writeString(v)
-        }
+        writeString(url)
+        writeDouble(startPosition)
+        writeString(sessionId)
+        writeDouble(1.0)
 
         // Offset Table
         val offsetTableOffset = baos.size()

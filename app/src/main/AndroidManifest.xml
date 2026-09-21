@@ -66,6 +66,7 @@
         <activity
             android:name=".CastWizardActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize"
             android:theme="@android:style/Theme.Material.NoActionBar" />
 
