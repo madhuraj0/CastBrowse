@@ -27,6 +27,7 @@ enum class CastProtocol {
     DLNA,
     AIRPLAY,
     DIAL,
+    ROKU,
     GOOGLE_CAST,
     WEB_RECEIVER
 }
@@ -183,7 +184,8 @@ class SsdpDiscoveryService(private val context: Context) {
                     val searchTargets = listOf(
                         "urn:schemas-upnp-org:device:MediaRenderer:1",
                         "urn:schemas-upnp-org:service:AVTransport:1",
-                        "urn:dial-multiscreen-org:service:dial:1"
+                        "urn:dial-multiscreen-org:service:dial:1",
+                        "roku:ecp"
                     )
 
                     for (target in searchTargets) {
@@ -283,7 +285,12 @@ class SsdpDiscoveryService(private val context: Context) {
 
             val appUrl = discoveredAppUrl ?: appUrlHeader ?: extractXmlValue(xml, "Application-URL")
 
+            val isRoku = locationUrl.contains(":8060") ||
+                    (modelName?.contains("Roku", ignoreCase = true) == true) ||
+                    friendlyName.contains("Roku", ignoreCase = true)
+
             val protocol = when {
+                isRoku -> CastProtocol.ROKU
                 fullControlUrl != null -> CastProtocol.DLNA
                 appUrl != null -> CastProtocol.DIAL
                 else -> null

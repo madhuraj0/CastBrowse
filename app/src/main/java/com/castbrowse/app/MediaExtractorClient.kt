@@ -604,6 +604,37 @@ class MediaExtractorClient(
                     isDrmProtected = isDrm,
                     drmKeySystem = drmSystem
                 ))
+
+                // Parse HLS master playlists to extract quality variants
+                if (!isDrm && (lowerUrl.contains(".m3u8") || lowerUrl.contains("/manifest") || lowerUrl.contains("/playlist"))) {
+                    scope.launch {
+                        try {
+                            val req = Request.Builder().url(url).apply {
+                                headers.forEach { (k, v) -> addHeader(k, v) }
+                            }.build()
+                            httpClient.newCall(req).execute().use { resp ->
+                                if (resp.isSuccessful) {
+                                    val body = resp.body?.string()
+                                    if (body != null && body.contains("#EXTM3U") && body.contains("#EXT-X-STREAM-INF")) {
+                                        val variants = HlsParser.parseMasterPlaylist(url, body)
+                                        for (variant in variants) {
+                                            LocalMediaProxy.registerUrlHeaders(variant.url, headers)
+                                            val label = if (variant.resolution.isNotEmpty()) variant.resolution else variant.bandwidthLabel
+                                            onMediaDiscovered(ExtractedVideo(
+                                                url = variant.url,
+                                                title = "$filename [$label]",
+                                                resolution = variant.resolution,
+                                                size = variant.bandwidthLabel
+                                            ))
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Master playlist variant extraction skipped: ${e.message}")
+                        }
+                    }
+                }
             }
         }
         return super.shouldInterceptRequest(view, request)

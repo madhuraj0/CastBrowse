@@ -14,8 +14,8 @@ android {
         applicationId = "com.castbrowse.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.17.1"
+        versionCode = 31
+        versionName = "1.18.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -86,4 +86,5 @@ dependencies {
     implementation(libs.androidx.security.crypto)
     implementation(libs.play.services.code.scanner)
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    testImplementation("junit:junit:4.13.2")
 }

@@ -99,7 +99,27 @@ object CastSessionManager {
                 )
             }
             CastProtocol.AIRPLAY -> {
-                AirPlayClient.play(
+                val photoBytes = try {
+                    context.contentResolver.openInputStream(photo.uri)?.use { it.readBytes() }
+                } catch (e: Exception) { null }
+
+                if (photoBytes != null) {
+                    AirPlayClient.displayPhoto(
+                        ipAddress = device.ipAddress,
+                        photoData = photoBytes,
+                        port = device.port
+                    )
+                } else {
+                    AirPlayClient.play(
+                        ipAddress = device.ipAddress,
+                        url = proxiedUrl,
+                        title = photo.title,
+                        port = device.port
+                    )
+                }
+            }
+            CastProtocol.ROKU -> {
+                RokuClient.play(
                     ipAddress = device.ipAddress,
                     url = proxiedUrl,
                     title = photo.title,
@@ -175,6 +195,16 @@ object CastSessionManager {
                     onDisconnected = onDisconnected
                 )
             }
+            CastProtocol.ROKU -> {
+                val targetPort = if (device.port > 0) device.port else RokuClient.ROKU_DEFAULT_PORT
+                RokuClient.play(
+                    ipAddress = device.ipAddress,
+                    url = mediaUrl,
+                    title = title,
+                    port = targetPort,
+                    onDisconnected = onDisconnected
+                )
+            }
             CastProtocol.DIAL -> {
                 val appUrl = device.applicationUrl ?: "http://${device.ipAddress}:${device.port}/apps"
                 val localIp = NetworkDiagnostics.getHotspotIp() ?: LocalMediaProxy.getLocalIpAddress()
@@ -206,6 +236,7 @@ object CastSessionManager {
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.pause()
             CastProtocol.AIRPLAY -> AirPlayClient.pause(device.ipAddress, device.port)
+            CastProtocol.ROKU -> RokuClient.pause(device.ipAddress, device.port)
             CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.pause()
             CastProtocol.FCAST -> FCastClient.pause(device.ipAddress, device.port)
         }
@@ -216,6 +247,7 @@ object CastSessionManager {
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.resume()
             CastProtocol.AIRPLAY -> AirPlayClient.resume(device.ipAddress, device.port)
+            CastProtocol.ROKU -> RokuClient.resume(device.ipAddress, device.port)
             CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.resume()
             CastProtocol.FCAST -> FCastClient.resume(device.ipAddress, device.port)
         }
@@ -226,6 +258,7 @@ object CastSessionManager {
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.seek(seconds)
             CastProtocol.AIRPLAY -> AirPlayClient.seek(seconds, device.ipAddress, device.port)
+            CastProtocol.ROKU -> RokuClient.seek(device.ipAddress, seconds, device.port)
             CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> WebReceiverController.seek(seconds)
             CastProtocol.FCAST -> FCastClient.seek(device.ipAddress, seconds, device.port)
         }
@@ -237,6 +270,7 @@ object CastSessionManager {
             when (device.protocol) {
                 CastProtocol.DLNA -> DlnaClient.stop()
                 CastProtocol.AIRPLAY -> AirPlayClient.stop(device.ipAddress, device.port)
+                CastProtocol.ROKU -> RokuClient.stop(device.ipAddress, device.port)
                 CastProtocol.DIAL -> {
                     DialClient.stopApp()
                     WebReceiverController.stop()
@@ -260,6 +294,7 @@ object CastSessionManager {
         when (device.protocol) {
             CastProtocol.DLNA -> DlnaClient.setVolume(volume)
             CastProtocol.AIRPLAY -> AirPlayClient.setVolume(volume, device.ipAddress, device.port)
+            CastProtocol.ROKU -> RokuClient.setVolume(device.ipAddress, volume, device.port)
             CastProtocol.DIAL, CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> {
                 CastSessionManager.volume = volume
             }

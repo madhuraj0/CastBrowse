@@ -493,22 +493,63 @@ class CastControlActivity : ComponentActivity() {
                         }
                     }
 
-                    // Seekbar Section
+                    // Seekbar & Live Stream Section
+                    val isLiveStream = CastSessionManager.mediaDurationSeconds <= 0.0 &&
+                            (CastSessionManager.activeMediaUrl?.contains(".m3u8", ignoreCase = true) == true ||
+                             CastSessionManager.activeMediaUrl?.contains("live", ignoreCase = true) == true)
+
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             val s = sliderValue.toInt()
                             val durationVal = CastSessionManager.mediaDurationSeconds.toInt()
                             val elapsedStr = String.format("%02d:%02d", s / 60, s % 60)
                             val durationStr = if (durationVal > 0) String.format("%02d:%02d", durationVal / 60, durationVal % 60) else "--:--"
-                            Text(
-                                text = "$elapsedStr / $durationStr",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+
+                            if (isLiveStream) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFFDC2626).copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.6f)),
+                                        modifier = Modifier.padding(end = 8.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .background(Color(0xFFEF4444), CircleShape)
+                                            )
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text(
+                                                text = "LIVE",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Black, fontSize = 10.sp),
+                                                color = Color(0xFFEF4444)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = elapsedStr,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "$elapsedStr / $durationStr",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
                             val stateLabel = when (CastSessionManager.playbackState) {
                                 1 -> "▶ Playing"
                                 2 -> "⏸ Paused"
@@ -522,22 +563,36 @@ class CastControlActivity : ComponentActivity() {
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        val maxDuration = if (CastSessionManager.mediaDurationSeconds > 0) CastSessionManager.mediaDurationSeconds.toFloat() else 7200f
-                        Slider(
-                            value = sliderValue.coerceIn(0f, maxDuration),
-                            onValueChange = { 
-                                sliderValue = it
-                                isUserSeeking = true
-                            },
-                            onValueChangeFinished = {
-                                isUserSeeking = false
-                                localOffsetSeconds = sliderValue.toInt()
-                                lifecycleScope.launch {
-                                    CastSessionManager.seek(sliderValue.toDouble())
-                                }
-                            },
-                            valueRange = 0f..maxDuration
-                        )
+
+                        if (isLiveStream) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = Color(0xFFEF4444),
+                                trackColor = MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        } else {
+                            val maxDuration = if (CastSessionManager.mediaDurationSeconds > 0) CastSessionManager.mediaDurationSeconds.toFloat() else 7200f
+                            Slider(
+                                value = sliderValue.coerceIn(0f, maxDuration),
+                                onValueChange = { 
+                                    sliderValue = it
+                                    isUserSeeking = true
+                                },
+                                onValueChangeFinished = {
+                                    isUserSeeking = false
+                                    localOffsetSeconds = sliderValue.toInt()
+                                    lifecycleScope.launch {
+                                        CastSessionManager.seek(sliderValue.toDouble())
+                                    }
+                                },
+                                valueRange = 0f..maxDuration
+                            )
+                        }
                     }
 
                     // 4. Primary Playback & Jump Controls Row

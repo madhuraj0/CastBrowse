@@ -7,8 +7,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.InetSocketAddress
@@ -189,7 +191,6 @@ object AirPlayClient {
             isTargetModernApple = false
             Log.i(TAG, "AirPlay: Target $ipAddress:$activePort /server-info returned $infoCode (modernApple=$isModernApple)")
 
-            var playSuccess = false
             var lastErrorCode = 0
             var lastErrorMessage = ""
 
@@ -259,18 +260,18 @@ object AirPlayClient {
             // Step 3: Negotiate payload format
             // If modern Apple (macOS Monterey+, tvOS 10.2+), try binary plist first then text/parameters.
             // If legacy or third-party (Android AirPlay, Kodi, UxPlay, AppleTV3), send text/parameters first!
-            if (isModernApple) {
-                playSuccess = tryBinaryPlist()
-                if (!playSuccess) {
+            val playSuccess = if (isModernApple) {
+                val ok = tryBinaryPlist()
+                if (!ok) {
                     Log.i(TAG, "AirPlay: Falling back to text/parameters for modern target...")
-                    playSuccess = tryTextParameters()
-                }
+                    tryTextParameters()
+                } else true
             } else {
-                playSuccess = tryTextParameters()
-                if (!playSuccess) {
+                val ok = tryTextParameters()
+                if (!ok) {
                     Log.i(TAG, "AirPlay: Falling back to binary plist for legacy/third-party target...")
-                    playSuccess = tryBinaryPlist()
-                }
+                    tryBinaryPlist()
+                } else true
             }
 
             if (!playSuccess) {
@@ -661,5 +662,35 @@ object AirPlayClient {
         baos.write(tableOffBuf)
 
         return baos.toByteArray()
+    }
+
+    /**
+     * Casts a still image / photo slide to the AirPlay receiver using standard PUT /photo.
+     */
+    suspend fun displayPhoto(
+        ipAddress: String,
+        photoData: ByteArray,
+        port: Int = AIRPLAY_DEFAULT_PORT
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val targetPort = if (port > 0) port else AIRPLAY_DEFAULT_PORT
+            val url = "http://$ipAddress:$targetPort/photo"
+            Log.i(TAG, "AirPlay: Displaying photo (${photoData.size} bytes) on $ipAddress:$targetPort")
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("User-Agent", "MediaControl/1.0")
+                .addHeader("X-Apple-AssetKey", UUID.randomUUID().toString())
+                .addHeader("X-Apple-Transition", "Dissolve")
+                .put(photoData.toRequestBody("image/jpeg".toMediaType()))
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (!response.isSuccessful && response.code !in 200..299) {
+                throw Exception("AirPlay /photo failed with HTTP ${response.code}: ${response.message}")
+            }
+            CastSessionManager.isMediaPlaying = true
+            CastSessionManager.playbackState = 1
+        }
     }
 }

@@ -801,6 +801,7 @@ object LocalMediaProxy {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CastBrowse TV Receiver</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
   body, html { width: 100%; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
@@ -1283,10 +1284,42 @@ object LocalMediaProxy {
   const SVG_FS_EXIT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7"/></svg>';
 
   let currentUrl = '';
+  let hlsPlayer = null;
   let lastCommandVersion = -1;
   let osdTimeout = null;
   const aspectModes = ['contain', 'cover', 'fill'];
   let currentAspectIdx = 0;
+
+  function loadStream(url) {
+    if (hlsPlayer) {
+      try { hlsPlayer.destroy(); } catch (e) {}
+      hlsPlayer = null;
+    }
+    const isHls = url.includes('.m3u8') || url.includes('/stream.m3u8');
+    if (isHls && !video.canPlayType('application/vnd.apple.mpegurl') && window.Hls && Hls.isSupported()) {
+      hlsPlayer = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hlsPlayer.loadSource(url);
+      hlsPlayer.attachMedia(video);
+      hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(() => {});
+      });
+      hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
+        if (data && data.fatal) {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hlsPlayer.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hlsPlayer.recoverMediaError();
+          } else {
+            hlsPlayer.destroy();
+            hlsPlayer = null;
+          }
+        }
+      });
+    } else {
+      video.src = url;
+      video.play().catch(() => {});
+    }
+  }
 
   function showOsd() {
     osdOverlay.classList.add('show');
@@ -1581,10 +1614,9 @@ object LocalMediaProxy {
 
           if (data.url && data.url !== currentUrl && data.mediaType !== 'photo') {
             currentUrl = data.url;
-            video.src = data.url;
+            loadStream(data.url);
             osdTitle.textContent = data.title || 'Streaming';
             idleScreen.style.display = 'none';
-            video.play().catch(() => {});
             if (!data.blackScreen) showOsd();
           }
           if (data.aspectRatio) {
@@ -1612,10 +1644,14 @@ object LocalMediaProxy {
           if (data.command === 'pause') {
             video.pause();
           } else if (data.command === 'resume' || data.command === 'play') {
-            if (video.src) video.play().catch(() => {});
+            if (video.src || hlsPlayer) video.play().catch(() => {});
           } else if (data.command === 'seek' && typeof data.seekTo === 'number') {
             video.currentTime = data.seekTo;
           } else if (data.command === 'stop') {
+            if (hlsPlayer) {
+              try { hlsPlayer.destroy(); } catch (e) {}
+              hlsPlayer = null;
+            }
             video.pause();
             video.removeAttribute('src');
             video.load();

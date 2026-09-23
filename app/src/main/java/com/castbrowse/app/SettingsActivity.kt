@@ -91,7 +91,7 @@ fun SettingsScreen(
     val isAmoled = currentTheme == "oled" || currentTheme == "amoled"
 
     var isAdBlockEnabled by remember { mutableStateOf(prefs.getBoolean("adblock_enabled", true)) }
-    var isPopupsEnabled by remember { mutableStateOf(prefs.getBoolean("popups_enabled", false)) }
+    var isBlockPopups by remember { mutableStateOf(prefs.getBoolean("block_popups", true)) }
     var isOledTvBlackScreen by remember { mutableStateOf(prefs.getBoolean("oled_tv_black_screen", true)) }
     var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", true)) }
     var isTabBarEnabled by remember { mutableStateOf(prefs.getBoolean("show_tab_bar", true)) }
@@ -402,10 +402,10 @@ fun SettingsScreen(
                     title = "Block Popups",
                     subtitle = "Block unexpected popups",
                     icon = Icons.Default.Star,
-                    checked = isPopupsEnabled,
+                    checked = isBlockPopups,
                     onCheckedChange = {
-                        isPopupsEnabled = it
-                        prefs.edit().putBoolean("popups_enabled", it).apply()
+                        isBlockPopups = it
+                        prefs.edit().putBoolean("block_popups", it).apply()
                     }
                 )
 

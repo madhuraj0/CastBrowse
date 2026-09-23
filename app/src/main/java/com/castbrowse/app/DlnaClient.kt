@@ -224,12 +224,25 @@ object DlnaClient {
             mimeType.startsWith("image/") -> "object.item.imageItem.photo"
             else -> "object.item.videoItem"
         }
+        val subUrl = CastSessionManager.activeSubtitleUrl
+        val subtitleXml = if (!subUrl.isNullOrEmpty()) {
+            val escapedSub = escapeXml(subUrl)
+            val subType = if (subUrl.contains(".vtt", ignoreCase = true)) "text/vtt" else "text/srt"
+            val secType = if (subUrl.contains(".vtt", ignoreCase = true)) "vtt" else "srt"
+            """
+                <res protocolInfo="http-get:*:$subType:*">$escapedSub</res>
+                <sec:CaptionInfo sec:type="$secType">$escapedSub</sec:CaptionInfo>
+                <sec:CaptionInfoEx sec:type="$secType">$escapedSub</sec:CaptionInfoEx>
+            """.trimIndent()
+        } else ""
+
         return """
-            <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+            <DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:sec="http://www.sec.co.kr/">
               <item id="0" parentID="-1" restricted="1">
                 <dc:title>$escapedTitle</dc:title>
                 <upnp:class>$upnpClass</upnp:class>
                 <res protocolInfo="http-get:*:$mimeType:*">$escapedUrl</res>
+                $subtitleXml
               </item>
             </DIDL-Lite>
         """.trimIndent().trim()

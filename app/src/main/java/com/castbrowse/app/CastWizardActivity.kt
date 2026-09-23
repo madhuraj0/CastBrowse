@@ -122,6 +122,7 @@ class CastWizardActivity : ComponentActivity() {
             val testProto = when (intent.getStringExtra("EXTRA_TEST_PROTO")?.uppercase()) {
                 "FCAST" -> CastProtocol.FCAST
                 "DLNA" -> CastProtocol.DLNA
+                "ROKU" -> CastProtocol.ROKU
                 else -> CastProtocol.AIRPLAY
             }
             val dev = CastDevice(testName, testIp, testPort, protocol = testProto)
@@ -426,6 +427,7 @@ class CastWizardActivity : ComponentActivity() {
                                         val protoName = when (activeDevice.protocol) {
                                             CastProtocol.DLNA -> "DLNA / Smart TV"
                                             CastProtocol.AIRPLAY -> "AirPlay"
+                                            CastProtocol.ROKU -> "Roku"
                                             CastProtocol.DIAL -> "DIAL / Smart TV"
                                             CastProtocol.GOOGLE_CAST -> "Google Cast"
                                             CastProtocol.WEB_RECEIVER -> "Web Receiver"
@@ -569,6 +571,7 @@ class CastWizardActivity : ComponentActivity() {
                         val protocolLabel = when (device.protocol) {
                             CastProtocol.DLNA -> "DLNA / Smart TV"
                             CastProtocol.AIRPLAY -> "AirPlay"
+                            CastProtocol.ROKU -> "Roku Streaming Player"
                             CastProtocol.DIAL -> "DIAL"
                             CastProtocol.GOOGLE_CAST -> "Google Cast"
                             CastProtocol.WEB_RECEIVER -> "Web Receiver"
@@ -577,6 +580,7 @@ class CastWizardActivity : ComponentActivity() {
                         val icon = when (device.protocol) {
                             CastProtocol.DLNA -> TvIcon
                             CastProtocol.AIRPLAY -> AirPlayIcon
+                            CastProtocol.ROKU -> TvIcon
                             CastProtocol.DIAL -> TvIcon
                             CastProtocol.GOOGLE_CAST -> CastIcon
                             CastProtocol.WEB_RECEIVER -> WebIcon

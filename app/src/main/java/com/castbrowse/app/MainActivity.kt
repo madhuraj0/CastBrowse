@@ -1080,7 +1080,7 @@ class MainActivity : ComponentActivity() {
         }
         var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
         var isAdBlockEnabled by remember { mutableStateOf(true) }
-        var isPopupsEnabled by remember { mutableStateOf(false) }
+        var isBlockPopups by remember { mutableStateOf(prefs.getBoolean("block_popups", true)) }
         var isDesktopMode by remember { mutableStateOf(false) }
         var showUserAgentDialog by remember { mutableStateOf(false) }
         var currentUaMode by remember { mutableStateOf(UserAgentManager.getUaMode(context)) }
@@ -2341,7 +2341,7 @@ class MainActivity : ComponentActivity() {
                                     isUserGesture: Boolean,
                                     resultMsg: android.os.Message?
                                 ): Boolean {
-                                    if (isPopupsEnabled) {
+                                    if (!isBlockPopups) {
                                         val transport = resultMsg?.obj as? WebView.WebViewTransport
                                         if (transport != null) {
                                             transport.webView = view
