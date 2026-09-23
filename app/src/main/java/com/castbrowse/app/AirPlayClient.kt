@@ -150,6 +150,7 @@ object AirPlayClient {
         url: String,
         title: String,
         port: Int = AIRPLAY_DEFAULT_PORT,
+        startPositionSeconds: Double = 0.0,
         onDisconnected: (() -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -161,7 +162,7 @@ object AirPlayClient {
             val sessionId = UUID.randomUUID().toString()
             activeSessionId = sessionId
 
-            Log.i(TAG, "AirPlay: Playing '$title' ($url) on $ipAddress:$activePort (session: $sessionId)")
+            Log.i(TAG, "AirPlay: Playing '$title' ($url) on $ipAddress:$activePort (session: $sessionId, startPos: $startPositionSeconds)")
 
             // Step 1: Establish persistent session TCP socket
             val socket = Socket()
@@ -182,7 +183,10 @@ object AirPlayClient {
                 )
             }
             val isModernApple = (infoCode in 200..299)
-            isTargetModernApple = isModernApple
+            // Start polling with isTargetModernApple = false so scrub-capable targets (Android AirPlay, UxPlay)
+            // are queried for real position and duration. Targets that reject /scrub (macOS Monterey+)
+            // transition automatically to modern Apple simulation and /server-info keepalives.
+            isTargetModernApple = false
             Log.i(TAG, "AirPlay: Target $ipAddress:$activePort /server-info returned $infoCode (modernApple=$isModernApple)")
 
             var playSuccess = false
@@ -191,7 +195,7 @@ object AirPlayClient {
 
             fun tryBinaryPlist(): Boolean {
                 return try {
-                    val bplistBytes = createPlayBinaryPlist(url, 0.0, sessionId)
+                    val bplistBytes = createPlayBinaryPlist(url, startPositionSeconds, sessionId)
                     val (code, respBytes) = sendSessionRequest(
                         method = "POST",
                         path = "/play",
@@ -222,7 +226,8 @@ object AirPlayClient {
 
             fun tryTextParameters(): Boolean {
                 return try {
-                    val textBody = "Content-Location: $url\r\nStart-Position: 0.0\r\n".toByteArray(Charsets.UTF_8)
+                    val formattedPos = String.format(java.util.Locale.US, "%.6f", startPositionSeconds)
+                    val textBody = "Content-Location: $url\r\nStart-Position: $formattedPos\r\n".toByteArray(Charsets.UTF_8)
                     val (code, respBytes) = sendSessionRequest(
                         method = "POST",
                         path = "/play",
@@ -282,7 +287,7 @@ object AirPlayClient {
 
             CastSessionManager.isMediaPlaying = true
             CastSessionManager.playbackState = 1
-            CastSessionManager.playbackPositionSeconds = 0.0
+            CastSessionManager.playbackPositionSeconds = startPositionSeconds
 
             startPolling(onDisconnected)
         }
@@ -401,8 +406,9 @@ object AirPlayClient {
                                     parseScrubResponse(String(infoBytes, Charsets.UTF_8))
                                 }
                             }
-                        } else if (infoCode == 500) {
+                        } else if (infoCode == 500 || infoCode == 404) {
                             isTargetModernApple = true
+                            consecutiveNetworkFails = 0
                             CastSessionManager.playbackPositionSeconds += 1.0
                         } else {
                             consecutiveNetworkFails++

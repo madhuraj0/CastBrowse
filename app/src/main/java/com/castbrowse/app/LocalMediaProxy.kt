@@ -230,8 +230,21 @@ object LocalMediaProxy {
             registerUrlHeaders(targetUrl, headers)
         }
         val ip = getLocalIpAddress(receiverIp)
+        val ext = when {
+            targetUrl.contains(".m3u8", ignoreCase = true) -> "/stream.m3u8"
+            targetUrl.contains(".mpd", ignoreCase = true) -> "/stream.mpd"
+            targetUrl.contains(".mp4", ignoreCase = true) -> "/video.mp4"
+            targetUrl.contains(".m4v", ignoreCase = true) -> "/video.m4v"
+            targetUrl.contains(".mov", ignoreCase = true) -> "/video.mov"
+            targetUrl.contains(".webm", ignoreCase = true) -> "/video.webm"
+            targetUrl.contains(".mp3", ignoreCase = true) -> "/audio.mp3"
+            targetUrl.contains(".m4a", ignoreCase = true) -> "/audio.m4a"
+            targetUrl.contains(".aac", ignoreCase = true) -> "/audio.aac"
+            targetUrl.contains(".flac", ignoreCase = true) -> "/audio.flac"
+            else -> "/video.mp4"
+        }
         val encodedUrl = URLEncoder.encode(targetUrl, "UTF-8")
-        return "http://$ip:$proxyPort/proxy?url=$encodedUrl"
+        return "http://$ip:$proxyPort/proxy$ext?url=$encodedUrl"
     }
 
     fun openUpstreamConnection(urlStr: String): HttpURLConnection {
@@ -595,7 +608,7 @@ object LocalMediaProxy {
 
                 val receiverIp = (socket.remoteSocketAddress as? java.net.InetSocketAddress)?.address?.hostAddress
                 val localIp = getLocalIpAddress(receiverIp)
-                val proxyBase = "http://$localIp:$proxyPort/proxy?url="
+                val proxyBase = "http://$localIp:$proxyPort/proxy"
                 val registeredHeaders = getHeadersForUrl(targetUrl)
 
                 val keyUriRegex = Regex("""(URI\s*=\s*["'])([^"']+)(["'])""")
@@ -616,7 +629,7 @@ object LocalMediaProxy {
                                 if (registeredHeaders != null) {
                                     registerUrlHeaders(resolvedUri, registeredHeaders)
                                 }
-                                "$prefix$proxyBase${URLEncoder.encode(resolvedUri, "UTF-8")}$suffix"
+                                "$prefix$proxyBase/key.bin?url=${URLEncoder.encode(resolvedUri, "UTF-8")}$suffix"
                             }
                         }
                         line.startsWith("#") -> rawLine
@@ -636,7 +649,8 @@ object LocalMediaProxy {
                             if (registeredHeaders != null) {
                                 registerUrlHeaders(resolvedUrl, registeredHeaders)
                             }
-                            "$proxyBase${URLEncoder.encode(resolvedUrl, "UTF-8")}"
+                            val subExt = if (resolvedUrl.contains(".m3u8", ignoreCase = true)) "/stream.m3u8" else "/segment.ts"
+                            "$proxyBase$subExt?url=${URLEncoder.encode(resolvedUrl, "UTF-8")}"
                         }
                     }
                 }
@@ -653,7 +667,8 @@ object LocalMediaProxy {
                 return
             }
             
-            out.write("HTTP/1.1 $responseCode ${connection.responseMessage}\r\n".toByteArray())
+            val respMsg = connection.responseMessage ?: "OK"
+            out.write("HTTP/1.1 $responseCode $respMsg\r\n".toByteArray())
             out.write("Access-Control-Allow-Origin: *\r\n".toByteArray())
             out.write("Access-Control-Allow-Headers: *\r\n".toByteArray())
             

@@ -171,6 +171,7 @@ object CastSessionManager {
                     url = mediaUrl,
                     title = title,
                     port = targetPort,
+                    startPositionSeconds = playbackPositionSeconds,
                     onDisconnected = onDisconnected
                 )
             }
