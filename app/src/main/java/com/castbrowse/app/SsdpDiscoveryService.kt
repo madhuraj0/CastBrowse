@@ -89,6 +89,7 @@ class SsdpDiscoveryService(private val context: Context) {
         }
 
         fun updateAndEmit(device: CastDevice) {
+            if (device.protocol == CastProtocol.AIRPLAY) return // AirPlay discovery temporarily disabled
             synchronized(discoveredDevices) {
                 val existingIndex = discoveredDevices.indexOfFirst { it.ipAddress == device.ipAddress }
                 if (existingIndex != -1) {
@@ -169,7 +170,8 @@ class SsdpDiscoveryService(private val context: Context) {
         val googleCastListener = createNsdListener(CastProtocol.GOOGLE_CAST, 8009, "Google Cast Receiver")
 
         try { nsdManager.discoverServices(FCAST_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, fcastListener) } catch (e: Exception) {}
-        try { nsdManager.discoverServices(AIRPLAY_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, airplayListener) } catch (e: Exception) {}
+        // AirPlay discovery temporarily disabled until future fix
+        // try { nsdManager.discoverServices(AIRPLAY_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, airplayListener) } catch (e: Exception) {}
         try { nsdManager.discoverServices(GOOGLECAST_SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, googleCastListener) } catch (e: Exception) {}
 
         // --- SSDP Multicast Discovery for DLNA / UPnP and DIAL ---

@@ -124,7 +124,7 @@ object NetworkDiagnostics {
      * Scans the hotspot subnet (192.168.43.2 to 192.168.43.30) for active receivers.
      */
     suspend fun scanHotspotSubnet(
-        ports: List<Int> = listOf(FCastClient.FCAST_DEFAULT_PORT, AirPlayClient.AIRPLAY_DEFAULT_PORT, 8080, 7676, 55000)
+        ports: List<Int> = listOf(FCastClient.FCAST_DEFAULT_PORT, 8080, 7676, 55000)
     ): List<CastDevice> = withContext(Dispatchers.IO) {
         val hotspotIp = getHotspotIp() ?: "192.168.43.1"
         val prefix = hotspotIp.substringBeforeLast(".") + "."

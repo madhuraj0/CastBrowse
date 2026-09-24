@@ -117,13 +117,13 @@ class CastWizardActivity : ComponentActivity() {
 
         val testIp = intent?.getStringExtra("EXTRA_TEST_IP")
         if (!testIp.isNullOrEmpty()) {
-            val testPort = intent.getIntExtra("EXTRA_TEST_PORT", AirPlayClient.AIRPLAY_DEFAULT_PORT)
-            val testName = intent.getStringExtra("EXTRA_TEST_NAME") ?: "AirPlay Receiver"
+            val testPort = intent.getIntExtra("EXTRA_TEST_PORT", FCastClient.FCAST_DEFAULT_PORT)
+            val testName = intent.getStringExtra("EXTRA_TEST_NAME") ?: "Cast Receiver"
             val testProto = when (intent.getStringExtra("EXTRA_TEST_PROTO")?.uppercase()) {
                 "FCAST" -> CastProtocol.FCAST
                 "DLNA" -> CastProtocol.DLNA
                 "ROKU" -> CastProtocol.ROKU
-                else -> CastProtocol.AIRPLAY
+                else -> CastProtocol.FCAST
             }
             val dev = CastDevice(testName, testIp, testPort, protocol = testProto)
             playTestStream(dev)
@@ -567,7 +567,7 @@ class CastWizardActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                    items(discoveredDevices) { device ->
+                    items(discoveredDevices.filter { it.protocol != CastProtocol.AIRPLAY }) { device ->
                         val protocolLabel = when (device.protocol) {
                             CastProtocol.DLNA -> "DLNA / Smart TV"
                             CastProtocol.AIRPLAY -> "AirPlay"

@@ -31,6 +31,9 @@ object CastSessionManager {
     /** Video aspect ratio: 16:9, Fill, Zoom, Original */
     var aspectRatio by mutableStateOf("16:9")
 
+    /** Playback speed (0.5x to 2.0x) */
+    var playbackSpeed by mutableStateOf(1.0f)
+
     /** Audio delay in ms (-500ms to +500ms) */
     var audioDelayMs by mutableStateOf(0)
 
@@ -99,6 +102,9 @@ object CastSessionManager {
                 )
             }
             CastProtocol.AIRPLAY -> {
+                // AirPlay connections temporarily disabled
+                Result.failure(Exception("AirPlay connections are temporarily disabled"))
+                /*
                 val photoBytes = try {
                     context.contentResolver.openInputStream(photo.uri)?.use { it.readBytes() }
                 } catch (e: Exception) { null }
@@ -117,6 +123,7 @@ object CastSessionManager {
                         port = device.port
                     )
                 }
+                */
             }
             CastProtocol.ROKU -> {
                 RokuClient.play(
@@ -192,6 +199,9 @@ object CastSessionManager {
                 )
             }
             CastProtocol.AIRPLAY -> {
+                // AirPlay connections temporarily disabled
+                Result.failure(Exception("AirPlay connections are temporarily disabled"))
+                /*
                 val targetPort = if (device.port > 0) device.port else AirPlayClient.AIRPLAY_DEFAULT_PORT
                 AirPlayClient.play(
                     ipAddress = device.ipAddress,
@@ -201,6 +211,7 @@ object CastSessionManager {
                     startPositionSeconds = playbackPositionSeconds,
                     onDisconnected = onDisconnected
                 )
+                */
             }
             CastProtocol.ROKU -> {
                 val targetPort = if (device.port > 0) device.port else RokuClient.ROKU_DEFAULT_PORT
@@ -293,7 +304,23 @@ object CastSessionManager {
         activeMediaTitle = null
         activeMediaType = "video"
         isSlideshowPlaying = false
+        playbackSpeed = 1.0f
         WebReceiverController.setBlackScreen(false)
+    }
+
+    suspend fun setSpeed(speed: Float) = withContext(Dispatchers.IO) {
+        playbackSpeed = speed
+        val device = castingDevice ?: return@withContext
+        when (device.protocol) {
+            CastProtocol.FCAST -> {
+                val targetPort = if (device.port > 0) device.port else customFcastPort
+                FCastClient.setSpeed(device.ipAddress, speed.toDouble(), targetPort)
+            }
+            CastProtocol.WEB_RECEIVER, CastProtocol.DIAL, CastProtocol.GOOGLE_CAST -> {
+                WebReceiverController.setSpeed(speed)
+            }
+            else -> {}
+        }
     }
 
     suspend fun setVolume(volume: Float) = withContext(Dispatchers.IO) {

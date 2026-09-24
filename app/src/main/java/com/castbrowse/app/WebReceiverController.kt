@@ -84,6 +84,7 @@ object WebReceiverController {
         commandVersion++
         activeMediaUrl = null
         activeMediaTitle = null
+        playbackSpeed = 1.0f
         CastSessionManager.isMediaPlaying = false
         CastSessionManager.playbackState = 0
         CastSessionManager.playbackPositionSeconds = 0.0
@@ -157,6 +158,14 @@ object WebReceiverController {
         Log.d(TAG, "WebReceiver: Dispatched showPhoto command for '$title' ($url)")
     }
 
+    @Volatile
+    var playbackSpeed: Float = 1.0f
+
+    fun setSpeed(speed: Float) {
+        playbackSpeed = speed
+        commandVersion++
+    }
+
     fun getStateJson(): String {
         return buildJsonObject {
             put("url", activeMediaUrl ?: "")
@@ -172,6 +181,7 @@ object WebReceiverController {
             put("blackScreen", isBlackScreenMode)
             put("photoUrl", activePhotoUrl ?: "")
             put("mediaType", mediaType)
+            put("speed", playbackSpeed)
         }.toString()
     }
 

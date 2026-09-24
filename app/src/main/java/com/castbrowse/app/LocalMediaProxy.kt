@@ -1702,6 +1702,9 @@ object LocalMediaProxy {
             video.style.objectFit = data.aspectRatio === 'Fill' ? 'fill' : data.aspectRatio === 'Zoom' ? 'cover' : 'contain';
             aspectLabel.textContent = data.aspectRatio;
           }
+          if (data.speed && video.playbackRate !== data.speed) {
+            video.playbackRate = data.speed;
+          }
           if (typeof data.loop === 'boolean') {
             video.loop = data.loop;
           }

@@ -288,6 +288,9 @@ class CastControlActivity : ComponentActivity() {
                 }
             } else {
                 val scrollState = rememberScrollState()
+                val protocol = activeDevice.protocol
+                val isWebReceiver = protocol == CastProtocol.WEB_RECEIVER || protocol == CastProtocol.DIAL || protocol == CastProtocol.GOOGLE_CAST
+                val isFCast = protocol == CastProtocol.FCAST
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -726,213 +729,219 @@ class CastControlActivity : ComponentActivity() {
                         }
                     }
 
-                    // 5. Aspect Ratio Selector
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            "Aspect Ratio",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf("16:9", "Fill", "Zoom", "Original").forEach { ratio ->
-                                val isSelected = CastSessionManager.aspectRatio == ratio
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .refractiveGlass(
-                                            shape = RoundedCornerShape(12.dp),
-                                            elevation = if (isSelected) 4.dp else 1.dp,
-                                            glowColor = if (isSelected) MaterialTheme.colorScheme.primary else null
-                                        )
-                                        .clickable {
-                                            CastSessionManager.updateAspectRatio(ratio)
-                                            Toast.makeText(context, "Aspect ratio: $ratio", Toast.LENGTH_SHORT).show()
-                                        }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = ratio,
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 6. A/V & Subtitle Sync Controls Card
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .refractiveGlass(
-                                shape = RoundedCornerShape(20.dp),
-                                elevation = 6.dp
-                            )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
+                    // 5. Aspect Ratio Selector (Supported on Web Receiver)
+                    if (isWebReceiver) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                "A/V & Subtitle Sync",
+                                "Aspect Ratio",
                                 style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                fontWeight = FontWeight.Bold
                             )
-
-                            // Audio Delay (-500ms to +500ms)
-                            Column {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "Audio Delay: ${if (CastSessionManager.audioDelayMs > 0) "+${CastSessionManager.audioDelayMs}" else "${CastSessionManager.audioDelayMs}"} ms",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    if (CastSessionManager.audioDelayMs != 0) {
-                                        Text(
-                                            "Reset (0ms)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable {
-                                                CastSessionManager.setAudioDelay(0)
-                                            }
-                                        )
-                                    }
-                                }
-                                Slider(
-                                    value = CastSessionManager.audioDelayMs.toFloat(),
-                                    onValueChange = {
-                                        val rounded = (Math.round(it / 50f) * 50).toInt()
-                                        CastSessionManager.setAudioDelay(rounded)
-                                    },
-                                    valueRange = -500f..500f,
-                                    steps = 19
-                                )
-                            }
-
-                            // Subtitle Offset (-2000ms to +2000ms)
-                            Column {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        "Subtitle Offset: ${if (CastSessionManager.subtitleOffsetMs > 0) "+${CastSessionManager.subtitleOffsetMs}" else "${CastSessionManager.subtitleOffsetMs}"} ms",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    if (CastSessionManager.subtitleOffsetMs != 0) {
-                                        Text(
-                                            "Reset (0ms)",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.clickable {
-                                                CastSessionManager.setSubtitleOffset(0)
-                                            }
-                                        )
-                                    }
-                                }
-                                Slider(
-                                    value = CastSessionManager.subtitleOffsetMs.toFloat(),
-                                    onValueChange = {
-                                        val rounded = (Math.round(it / 100f) * 100).toInt()
-                                        CastSessionManager.setSubtitleOffset(rounded)
-                                    },
-                                    valueRange = -2000f..2000f,
-                                    steps = 39
-                                )
-                            }
-                        }
-                    }
-
-                    // 7. External Subtitles (.srt / .vtt) Card
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .refractiveGlass(
-                                shape = RoundedCornerShape(20.dp),
-                                elevation = 6.dp
-                            )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                            Spacer(modifier = Modifier.height(8.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("16:9", "Fill", "Zoom", "Original").forEach { ratio ->
+                                    val isSelected = CastSessionManager.aspectRatio == ratio
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .refractiveGlass(
+                                                shape = RoundedCornerShape(12.dp),
+                                                elevation = if (isSelected) 4.dp else 1.dp,
+                                                glowColor = if (isSelected) MaterialTheme.colorScheme.primary else null
+                                            )
+                                            .clickable {
+                                                CastSessionManager.updateAspectRatio(ratio)
+                                                Toast.makeText(context, "Aspect ratio: $ratio", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = ratio,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 6. A/V & Subtitle Sync Controls Card (Supported on Web Receiver)
+                    if (isWebReceiver) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(20.dp),
+                                    elevation = 6.dp
+                                )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Text(
+                                    "A/V & Subtitle Sync",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+
+                                // Audio Delay (-500ms to +500ms)
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "Audio Delay: ${if (CastSessionManager.audioDelayMs > 0) "+${CastSessionManager.audioDelayMs}" else "${CastSessionManager.audioDelayMs}"} ms",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        if (CastSessionManager.audioDelayMs != 0) {
+                                            Text(
+                                                "Reset (0ms)",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.clickable {
+                                                    CastSessionManager.setAudioDelay(0)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    Slider(
+                                        value = CastSessionManager.audioDelayMs.toFloat(),
+                                        onValueChange = {
+                                            val rounded = (Math.round(it / 50f) * 50).toInt()
+                                            CastSessionManager.setAudioDelay(rounded)
+                                        },
+                                        valueRange = -500f..500f,
+                                        steps = 19
+                                    )
+                                }
+
+                                // Subtitle Offset (-2000ms to +2000ms)
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "Subtitle Offset: ${if (CastSessionManager.subtitleOffsetMs > 0) "+${CastSessionManager.subtitleOffsetMs}" else "${CastSessionManager.subtitleOffsetMs}"} ms",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        if (CastSessionManager.subtitleOffsetMs != 0) {
+                                            Text(
+                                                "Reset (0ms)",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.clickable {
+                                                    CastSessionManager.setSubtitleOffset(0)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    Slider(
+                                        value = CastSessionManager.subtitleOffsetMs.toFloat(),
+                                        onValueChange = {
+                                            val rounded = (Math.round(it / 100f) * 100).toInt()
+                                            CastSessionManager.setSubtitleOffset(rounded)
+                                        },
+                                        valueRange = -2000f..2000f,
+                                        steps = 39
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 7. External Subtitles (.srt / .vtt) Card (Supported on Web Receiver)
+                    if (isWebReceiver) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .refractiveGlass(
+                                    shape = RoundedCornerShape(20.dp),
+                                    elevation = 6.dp
+                                )
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = SubtitlesIcon,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Text(
-                                        "External Subtitles",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = SubtitlesIcon,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Text(
+                                            "External Subtitles",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    if (CastSessionManager.activeSubtitleName != null) {
+                                        Text(
+                                            "Remove",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.clickable {
+                                                SubtitleManager.clearSubtitles()
+                                                Toast.makeText(context, "Subtitles removed", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
                                 }
+
                                 if (CastSessionManager.activeSubtitleName != null) {
                                     Text(
-                                        "Remove",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.error,
+                                        text = "Active: ${CastSessionManager.activeSubtitleName}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.secondary,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.clickable {
-                                            SubtitleManager.clearSubtitles()
-                                            Toast.makeText(context, "Subtitles removed", Toast.LENGTH_SHORT).show()
-                                        }
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Inject local .srt or .vtt subtitle files directly into your cast stream.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                            }
 
-                            if (CastSessionManager.activeSubtitleName != null) {
-                                Text(
-                                    text = "Active: ${CastSessionManager.activeSubtitleName}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            } else {
-                                Text(
-                                    text = "Inject local .srt or .vtt subtitle files directly into your cast stream.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            FilledTonalButton(
-                                onClick = {
-                                    subtitlePickerLauncher.launch("*/*")
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Choose .SRT or .VTT File", fontWeight = FontWeight.Bold)
+                                FilledTonalButton(
+                                    onClick = {
+                                        subtitlePickerLauncher.launch("*/*")
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Choose .SRT or .VTT File", fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
@@ -1119,59 +1128,57 @@ class CastControlActivity : ComponentActivity() {
                         )
                     }
 
-                    // 10. Playback Speed Selector
-                    var speedState by remember { mutableStateOf(1.0f) }
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                "Playback Speed",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "${speedState}x",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .refractiveGlass(
-                                            shape = RoundedCornerShape(12.dp),
-                                            elevation = if (speedState == speed) 4.dp else 1.dp,
-                                            glowColor = if (speedState == speed) MaterialTheme.colorScheme.primary else null
-                                        )
-                                        .clickable {
-                                            speedState = speed
-                                            lifecycleScope.launch {
-                                                FCastClient.setSpeed(
-                                                    activeDevice.ipAddress,
-                                                    speed.toDouble(),
-                                                    targetPort
-                                                )
+                    // 10. Playback Speed Selector (Supported by FCast and Web Receiver)
+                    if (isFCast || isWebReceiver) {
+                        var speedState by remember { mutableStateOf(CastSessionManager.playbackSpeed) }
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Playback Speed",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "${speedState}x",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .refractiveGlass(
+                                                shape = RoundedCornerShape(12.dp),
+                                                elevation = if (speedState == speed) 4.dp else 1.dp,
+                                                glowColor = if (speedState == speed) MaterialTheme.colorScheme.primary else null
+                                            )
+                                            .clickable {
+                                                speedState = speed
+                                                lifecycleScope.launch {
+                                                    CastSessionManager.setSpeed(speed)
+                                                }
                                             }
-                                        }
-                                        .padding(vertical = 10.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${speed}x",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (speedState == speed) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "${speed}x",
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = if (speedState == speed) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
