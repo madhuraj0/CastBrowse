@@ -2533,11 +2533,19 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Home & New Tab Speed Dial Bookmarks Overlay
-                val isHomeTab = activeTab.url == "https://html.duckduckgo.com" ||
-                                activeTab.url == "https://html.duckduckgo.com/" ||
-                                activeTab.url.startsWith("https://html.duckduckgo.com/html") ||
-                                activeTab.url == "about:blank" ||
-                                activeTab.url.isEmpty()
+                val hasQuery = activeTab.url.contains("?") || activeTab.url.contains("&q=")
+                val isSearchResultsTitle = activeTab.title.contains(" at DuckDuckGo", ignoreCase = true)
+                val urlWithoutQuery = activeTab.url.substringBefore('?').substringBefore('#').trimEnd('/')
+                val isHomeTab = !hasQuery && !isSearchResultsTitle && (
+                    urlWithoutQuery.equals("https://html.duckduckgo.com", ignoreCase = true) ||
+                    urlWithoutQuery.equals("https://html.duckduckgo.com/html", ignoreCase = true) ||
+                    urlWithoutQuery.equals("http://html.duckduckgo.com", ignoreCase = true) ||
+                    urlWithoutQuery.equals("http://html.duckduckgo.com/html", ignoreCase = true) ||
+                    urlWithoutQuery.equals("https://duckduckgo.com", ignoreCase = true) ||
+                    urlWithoutQuery.equals("http://duckduckgo.com", ignoreCase = true) ||
+                    urlWithoutQuery.equals("about:blank", ignoreCase = true) ||
+                    urlWithoutQuery.isEmpty()
+                )
                 var hideSpeedDial by remember(activeTabId, activeTab.url) { mutableStateOf(false) }
 
                 if (isHomeTab && !hideSpeedDial) {
@@ -2545,6 +2553,7 @@ class MainActivity : ComponentActivity() {
                     val isDark = themeMode != "light"
                     SpeedDialHomeScreen(
                         onOpenUrl = { targetUrl ->
+                            hideSpeedDial = true
                             handleUrlInput(targetUrl)
                         },
                         onDismissToHome = {
