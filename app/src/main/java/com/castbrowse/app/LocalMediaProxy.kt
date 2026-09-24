@@ -1,6 +1,7 @@
 package com.castbrowse.app
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -245,6 +246,14 @@ object LocalMediaProxy {
         }
         val encodedUrl = URLEncoder.encode(targetUrl, "UTF-8")
         return "http://$ip:$proxyPort/proxy$ext?url=$encodedUrl"
+    }
+
+    /**
+     * Checks if a given media URL is already served locally via LocalMediaProxy.
+     */
+    fun isProxyUrl(url: String): Boolean {
+        if (url.isEmpty()) return false
+        return url.contains("/proxy") || url.contains("/local") || url.contains("/tv") || url.contains("/subtitles")
     }
 
     fun openUpstreamConnection(urlStr: String): HttpURLConnection {

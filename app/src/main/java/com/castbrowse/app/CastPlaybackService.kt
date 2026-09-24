@@ -112,6 +112,8 @@ class CastPlaybackService : Service() {
     override fun onCreate() {
         super.onCreate()
         CastSessionManager.appContext = applicationContext
+        LocalMediaProxy.init(applicationContext)
+        LocalMediaProxy.start()
         createNotificationChannel()
         acquireWakeAndWifiLocks()
         initMediaSession()
@@ -157,6 +159,7 @@ class CastPlaybackService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_START -> {
+                LocalMediaProxy.start()
                 currentTitle = intent.getStringExtra(EXTRA_TITLE) ?: "Media Stream"
                 currentDeviceName = intent.getStringExtra(EXTRA_DEVICE_NAME) ?: "FCast Receiver"
                 currentIp = intent.getStringExtra(EXTRA_IP) ?: ""

@@ -162,8 +162,15 @@ object CastSessionManager {
         type: String = activeMediaType,
         onDisconnected: (() -> Unit)? = null
     ): Result<Unit> = withContext(Dispatchers.IO) {
+        LocalMediaProxy.start()
+        val proxiedUrl = if (LocalMediaProxy.isProxyUrl(mediaUrl)) {
+            mediaUrl
+        } else {
+            LocalMediaProxy.getProxyUrl(mediaUrl, receiverIp = device.ipAddress)
+        }
+
         castingDevice = device
-        activeMediaUrl = mediaUrl
+        activeMediaUrl = proxiedUrl
         activeMediaTitle = title
         activeMediaType = type
 
@@ -179,7 +186,7 @@ object CastSessionManager {
                 DlnaClient.play(
                     controlUrl = controlUrl,
                     renderingControlUrl = device.renderingControlUrl,
-                    mediaUrl = mediaUrl,
+                    mediaUrl = proxiedUrl,
                     title = title,
                     onDisconnected = onDisconnected
                 )
@@ -188,7 +195,7 @@ object CastSessionManager {
                 val targetPort = if (device.port > 0) device.port else AirPlayClient.AIRPLAY_DEFAULT_PORT
                 AirPlayClient.play(
                     ipAddress = device.ipAddress,
-                    url = mediaUrl,
+                    url = proxiedUrl,
                     title = title,
                     port = targetPort,
                     startPositionSeconds = playbackPositionSeconds,
@@ -199,7 +206,7 @@ object CastSessionManager {
                 val targetPort = if (device.port > 0) device.port else RokuClient.ROKU_DEFAULT_PORT
                 RokuClient.play(
                     ipAddress = device.ipAddress,
-                    url = mediaUrl,
+                    url = proxiedUrl,
                     title = title,
                     port = targetPort,
                     onDisconnected = onDisconnected
@@ -210,18 +217,18 @@ object CastSessionManager {
                 val localIp = NetworkDiagnostics.getHotspotIp() ?: LocalMediaProxy.getLocalIpAddress()
                 val proxyWebReceiverUrl = "http://$localIp:${LocalMediaProxy.proxyPort}/tv"
                 DialClient.launchApp(appUrl, "WebBrowser", proxyWebReceiverUrl)
-                WebReceiverController.play(mediaUrl, title)
+                WebReceiverController.play(proxiedUrl, title)
                 Result.success(Unit)
             }
             CastProtocol.GOOGLE_CAST, CastProtocol.WEB_RECEIVER -> {
-                WebReceiverController.play(mediaUrl, title)
+                WebReceiverController.play(proxiedUrl, title)
                 Result.success(Unit)
             }
             CastProtocol.FCAST -> {
                 val targetPort = if (device.port > 0) device.port else customFcastPort
                 FCastClient.play(
                     ipAddress = device.ipAddress,
-                    url = mediaUrl,
+                    url = proxiedUrl,
                     title = title,
                     port = targetPort,
                     headers = null,

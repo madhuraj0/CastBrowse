@@ -575,6 +575,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        LocalMediaProxy.start()
         onThemeResumeCallback?.invoke()
     }
 
@@ -1081,6 +1082,7 @@ class MainActivity : ComponentActivity() {
         var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
         var isAdBlockEnabled by remember { mutableStateOf(true) }
         var isBlockPopups by remember { mutableStateOf(prefs.getBoolean("block_popups", true)) }
+        var isPullToRefreshEnabled by remember { mutableStateOf(prefs.getBoolean("pull_to_refresh_enabled", false)) }
         var isDesktopMode by remember { mutableStateOf(false) }
         var showUserAgentDialog by remember { mutableStateOf(false) }
         var currentUaMode by remember { mutableStateOf(UserAgentManager.getUaMode(context)) }
@@ -2454,13 +2456,22 @@ class MainActivity : ComponentActivity() {
                                     ViewGroup.LayoutParams.MATCH_PARENT
                                 )
                             )
+                            isEnabled = isPullToRefreshEnabled
+                            setOnChildScrollUpCallback { _, _ ->
+                                !isPullToRefreshEnabled || wv.scrollY > 0 || wv.canScrollVertically(-1)
+                            }
                             setOnRefreshListener {
                                 wv.reload()
                             }
                         }
                     },
                     update = { swipeRefresh ->
-                        swipeRefresh.isRefreshing = isLoading
+                        val shouldEnableRefresh = prefs.getBoolean("pull_to_refresh_enabled", false)
+                        if (isPullToRefreshEnabled != shouldEnableRefresh) {
+                            isPullToRefreshEnabled = shouldEnableRefresh
+                        }
+                        swipeRefresh.isEnabled = isPullToRefreshEnabled
+                        swipeRefresh.isRefreshing = isLoading && isPullToRefreshEnabled
                         val view = webView ?: return@AndroidView
 
                         if (defaultUserAgent == null) {

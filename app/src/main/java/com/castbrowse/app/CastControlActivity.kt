@@ -1034,14 +1034,15 @@ class CastControlActivity : ComponentActivity() {
                                                         onClick = {
                                                             lifecycleScope.launch {
                                                                 CastSessionManager.removeFromQueue(index)
-                                                                CastSessionManager.play(activeDevice, video.url, title)
+                                                                val proxied = if (LocalMediaProxy.isProxyUrl(video.url)) video.url else LocalMediaProxy.getProxyUrl(video.url, receiverIp = activeDevice.ipAddress)
+                                                                CastSessionManager.play(activeDevice, proxied, title)
                                                                 CastPlaybackService.start(
                                                                     context = this@CastControlActivity,
                                                                     title = title,
                                                                     deviceName = activeDevice.name,
                                                                     ip = activeDevice.ipAddress,
                                                                     port = targetPort,
-                                                                    url = video.url
+                                                                    url = proxied
                                                                 )
                                                             }
                                                         },

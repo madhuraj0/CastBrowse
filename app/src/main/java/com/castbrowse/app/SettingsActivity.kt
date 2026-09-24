@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -96,6 +97,7 @@ fun SettingsScreen(
     var isBottomBarEnabled by remember { mutableStateOf(prefs.getBoolean("bottom_address_bar", true)) }
     var isTabBarEnabled by remember { mutableStateOf(prefs.getBoolean("show_tab_bar", true)) }
     var isHistoryEnabled by remember { mutableStateOf(prefs.getBoolean("history_enabled", false)) }
+    var isPullToRefreshEnabled by remember { mutableStateOf(prefs.getBoolean("pull_to_refresh_enabled", false)) }
 
     var showCreditsDialog by remember { mutableStateOf(false) }
     var showPrivacyDialog by remember { mutableStateOf(false) }
@@ -419,6 +421,19 @@ fun SettingsScreen(
                     onCheckedChange = {
                         isHistoryEnabled = it
                         prefs.edit().putBoolean("history_enabled", it).apply()
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f), thickness = 0.5.dp)
+
+                SettingsToggleItem(
+                    title = "Pull to Refresh",
+                    subtitle = "Swipe down from top to reload (keep off for smoother scrolling)",
+                    icon = Icons.Default.Refresh,
+                    checked = isPullToRefreshEnabled,
+                    onCheckedChange = {
+                        isPullToRefreshEnabled = it
+                        prefs.edit().putBoolean("pull_to_refresh_enabled", it).apply()
                     }
                 )
             }
