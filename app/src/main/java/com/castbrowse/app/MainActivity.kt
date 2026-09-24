@@ -848,16 +848,25 @@ class MainActivity : ComponentActivity() {
             headers["Sec-Fetch-Mode"] = "cors"
             headers["Sec-Fetch-Site"] = "cross-site"
             headers["Sec-Fetch-Dest"] = if (type == "audio") "audio" else "video"
-            val cookies = try { android.webkit.CookieManager.getInstance().getCookie(videoUrl) } catch (e: Exception) { null }
-            if (!cookies.isNullOrEmpty()) {
-                headers["Cookie"] = cookies
+            val pageCookies = if (!activeTabUrl.isNullOrEmpty()) {
+                try { android.webkit.CookieManager.getInstance().getCookie(activeTabUrl) } catch (e: Exception) { null }
+            } else null
+            val videoCookies = try { android.webkit.CookieManager.getInstance().getCookie(videoUrl) } catch (e: Exception) { null }
+            val combinedCookies = when {
+                !pageCookies.isNullOrEmpty() && !videoCookies.isNullOrEmpty() -> {
+                    if (pageCookies == videoCookies) pageCookies else "$pageCookies; $videoCookies"
+                }
+                !videoCookies.isNullOrEmpty() -> videoCookies
+                !pageCookies.isNullOrEmpty() -> pageCookies
+                else -> null
+            }
+            if (!combinedCookies.isNullOrEmpty()) {
+                headers["Cookie"] = combinedCookies
             }
 
             // Route through LocalMediaProxy for all remote streams to attach headers/cookies
             // and preserve leak-proof mobile VPN tunneling for geo/IP-locked content.
             val proxiedUrl = if (videoUrl.contains("/local?id=")) {
-                videoUrl
-            } else if (device.protocol == CastProtocol.AIRPLAY && (headers["Cookie"].isNullOrEmpty() && headers["Referer"].isNullOrEmpty())) {
                 videoUrl
             } else {
                 LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
@@ -881,7 +890,7 @@ class MainActivity : ComponentActivity() {
             CastSessionManager.isCasting = false
             result.onSuccess {
                 CastSessionManager.isMediaPlaying = true
-                CastSessionManager.activeMediaUrl = videoUrl
+                CastSessionManager.activeMediaUrl = proxiedUrl
                 CastSessionManager.activeMediaTitle = cleanTitle
                 CastSessionManager.castingDevice = device
                 CastSessionManager.customFcastPort = targetPort

@@ -14,8 +14,8 @@ android {
         applicationId = "com.castbrowse.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
-        versionName = "1.18.2"
+        versionCode = 34
+        versionName = "1.18.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -61,6 +61,11 @@ android {
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
+    }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
     }
     packaging {
         resources {

@@ -284,7 +284,7 @@ class CastWizardActivity : ComponentActivity() {
                 CastSessionManager.castingDevice = device
                 CastSessionManager.customFcastPort = targetPort
                 CastSessionManager.isMediaPlaying = true
-                CastSessionManager.activeMediaUrl = TEST_VIDEO_URL
+                CastSessionManager.activeMediaUrl = proxiedTestUrl
                 CastSessionManager.saveRecentIp(this@CastWizardActivity, device.ipAddress)
                 CastPlaybackService.start(
                     context = this@CastWizardActivity,

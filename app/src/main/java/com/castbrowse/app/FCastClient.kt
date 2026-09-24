@@ -325,24 +325,13 @@ object FCastClient {
 
     private fun getContainerType(url: String): String? {
         var targetUrl = url
-        if (url.contains("/proxy?") && url.contains("url=")) {
-            try {
-                val uri = java.net.URI(url)
-                val query = uri.query ?: ""
-                val urlParam = query.split("&")
-                    .firstOrNull { it.startsWith("url=") }
-                    ?.substringAfter("url=")
-                if (urlParam != null) {
-                    targetUrl = java.net.URLDecoder.decode(urlParam, "UTF-8")
-                }
-            } catch (e: Exception) {
-                val idx = url.indexOf("url=")
-                if (idx != -1) {
-                    val rawVal = url.substring(idx + 4).substringBefore("&")
-                    try {
-                        targetUrl = java.net.URLDecoder.decode(rawVal, "UTF-8")
-                    } catch (ex: Exception) {}
-                }
+        if (url.contains("/proxy") && url.contains("url=")) {
+            val idx = url.indexOf("url=")
+            if (idx != -1) {
+                val rawVal = url.substring(idx + 4)
+                try {
+                    targetUrl = java.net.URLDecoder.decode(rawVal, "UTF-8")
+                } catch (ex: Exception) {}
             }
         }
 

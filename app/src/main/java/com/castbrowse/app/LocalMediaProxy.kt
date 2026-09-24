@@ -140,7 +140,9 @@ object LocalMediaProxy {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "LocalMediaProxy start error: ${e.message}")
+            try {
+                Log.e(TAG, "LocalMediaProxy start error: ${e.message}")
+            } catch (ex: Throwable) {}
         }
     }
 
@@ -227,6 +229,17 @@ object LocalMediaProxy {
 
     fun getProxyUrl(targetUrl: String, headers: Map<String, String>? = null, receiverIp: String? = null): String {
         start() // Guarantee proxy server is bound and running
+        if (isProxyUrl(targetUrl)) {
+            if (headers != null && headers.isNotEmpty()) {
+                val idx = targetUrl.indexOf("url=")
+                if (idx != -1) {
+                    val raw = targetUrl.substring(idx + 4)
+                    val dec = try { URLDecoder.decode(raw, "UTF-8") } catch (e: Exception) { raw }
+                    registerUrlHeaders(dec, headers)
+                }
+            }
+            return targetUrl
+        }
         if (headers != null && headers.isNotEmpty()) {
             registerUrlHeaders(targetUrl, headers)
         }
@@ -364,6 +377,19 @@ object LocalMediaProxy {
             val path = parts[1]
             Log.i(TAG, "Incoming: $method $path from ${socket.inetAddress?.hostAddress}")
 
+            if (method == "OPTIONS") {
+                val out = socket.getOutputStream()
+                out.write(("HTTP/1.1 204 No Content\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, HEAD, OPTIONS, POST\r\n" +
+                        "Access-Control-Allow-Headers: *\r\n" +
+                        "Access-Control-Max-Age: 86400\r\n" +
+                        "Content-Length: 0\r\n" +
+                        "Connection: close\r\n\r\n").toByteArray())
+                out.flush()
+                return
+            }
+
             if (path == "/tv" || path == "/tv/") {
                 socket.inetAddress?.hostAddress?.let { clientIp ->
                     WebReceiverController.recordHeartbeat(clientIp)
@@ -460,10 +486,18 @@ object LocalMediaProxy {
             
             val targetUrl = if (path.startsWith("/proxy")) {
                 val urlParamIndex = path.indexOf("url=")
-                if (urlParamIndex == -1) return
+                if (urlParamIndex == -1) {
+                    val out = socket.getOutputStream()
+                    out.write("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".toByteArray())
+                    out.flush()
+                    return
+                }
                 val rawVal = path.substring(urlParamIndex + 4)
-                val encodedUrl = if (rawVal.contains("&")) rawVal.substringBefore("&") else rawVal
-                val decoded = URLDecoder.decode(encodedUrl, "UTF-8")
+                val decoded = try {
+                    URLDecoder.decode(rawVal, "UTF-8")
+                } catch (e: Exception) {
+                    rawVal
+                }
                 
                 // Extract and store the base URL of this target
                 try {
@@ -521,11 +555,10 @@ object LocalMediaProxy {
                     }
                 }
                 
-                // Forward client headers, excluding Host/Connection/Range
+                // Forward client headers, excluding Host/Connection/Range/User-Agent (don't leak TV receiver UA to origin CDN)
                 for ((key, value) in clientHeaders) {
                     val lowerKey = key.lowercase()
-                    if (lowerKey == "host" || lowerKey == "connection" || lowerKey == "range") continue
-                    if (lowerKey == "user-agent" && regLowerKeys.contains("user-agent")) continue
+                    if (lowerKey == "host" || lowerKey == "connection" || lowerKey == "range" || lowerKey == "user-agent") continue
                     if (!regLowerKeys.contains(lowerKey)) {
                         conn.setRequestProperty(key, value)
                     }
@@ -615,6 +648,13 @@ object LocalMediaProxy {
                 val manifestContent = inputStream.bufferedReader().readText()
                 inputStream.close()
 
+                if (manifestContent.trim().startsWith("<!DOCTYPE", ignoreCase = true) || manifestContent.trim().startsWith("<html", ignoreCase = true)) {
+                    Log.e(TAG, "Upstream returned HTML instead of M3U8 manifest: ${manifestContent.take(200)}")
+                    out.write("HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nContent-Length: 35\r\nConnection: close\r\n\r\nUpstream returned HTML not manifest".toByteArray())
+                    out.flush()
+                    return
+                }
+
                 val receiverIp = (socket.remoteSocketAddress as? java.net.InetSocketAddress)?.address?.hostAddress
                 val localIp = getLocalIpAddress(receiverIp)
                 val proxyBase = "http://$localIp:$proxyPort/proxy"
@@ -625,30 +665,55 @@ object LocalMediaProxy {
                     val line = rawLine.trim()
                     when {
                         line.isEmpty() -> rawLine
-                        line.startsWith("#EXT-X-KEY") || line.startsWith("#EXT-X-MAP") -> {
-                            keyUriRegex.replace(rawLine) { match ->
-                                val prefix = match.groupValues[1]
-                                val uriVal = match.groupValues[2]
-                                val suffix = match.groupValues[3]
-                                val resolvedUri = try {
-                                    URI(targetUrl).resolve(uriVal).toString()
-                                } catch (e: Exception) {
-                                    uriVal
+                        line.startsWith("#") -> {
+                            if (keyUriRegex.containsMatchIn(rawLine)) {
+                                keyUriRegex.replace(rawLine) { match ->
+                                    val prefix = match.groupValues[1]
+                                    val uriVal = match.groupValues[2]
+                                    val suffix = match.groupValues[3]
+                                    var resolvedUri = try {
+                                        URI(targetUrl).resolve(uriVal).toString()
+                                    } catch (e: Exception) {
+                                        if (uriVal.startsWith("http://") || uriVal.startsWith("https://")) uriVal
+                                        else if (uriVal.startsWith("/")) {
+                                            val uri = URI(targetUrl)
+                                            "${uri.scheme}://${uri.authority}$uriVal"
+                                        } else {
+                                            targetUrl.substringBeforeLast("/") + "/" + uriVal
+                                        }
+                                    }
+                                    if (!resolvedUri.contains("?") && targetUrl.contains("?")) {
+                                        val query = targetUrl.substringAfter("?")
+                                        resolvedUri = "$resolvedUri?$query"
+                                    }
+                                    if (registeredHeaders != null) {
+                                        registerUrlHeaders(resolvedUri, registeredHeaders)
+                                    }
+                                    val childExt = when {
+                                        resolvedUri.contains(".m3u8", ignoreCase = true) -> "/stream.m3u8"
+                                        line.startsWith("#EXT-X-KEY") -> "/key.bin"
+                                        resolvedUri.contains(".m4s", ignoreCase = true) || resolvedUri.contains(".mp4", ignoreCase = true) -> "/segment.mp4"
+                                        resolvedUri.contains(".vtt", ignoreCase = true) || resolvedUri.contains(".webvtt", ignoreCase = true) -> "/subtitles.vtt"
+                                        else -> "/segment.ts"
+                                    }
+                                    "$prefix$proxyBase$childExt?url=${URLEncoder.encode(resolvedUri, "UTF-8")}$suffix"
                                 }
-                                if (registeredHeaders != null) {
-                                    registerUrlHeaders(resolvedUri, registeredHeaders)
-                                }
-                                "$prefix$proxyBase/key.bin?url=${URLEncoder.encode(resolvedUri, "UTF-8")}$suffix"
+                            } else {
+                                rawLine
                             }
                         }
-                        line.startsWith("#") -> rawLine
                         else -> {
                             // Segment or sub-playlist URL
                             var resolvedUrl = try {
                                 URI(targetUrl).resolve(line).toString()
                             } catch (e: Exception) {
                                 if (line.startsWith("http://") || line.startsWith("https://")) line
-                                else "${lastProxyBaseUrl ?: ""}$line"
+                                else if (line.startsWith("/")) {
+                                    val uri = URI(targetUrl)
+                                    "${uri.scheme}://${uri.authority}$line"
+                                } else {
+                                    targetUrl.substringBeforeLast("/") + "/" + line
+                                }
                             }
                             // Inherit query tokens from parent manifest if missing
                             if (!resolvedUrl.contains("?") && targetUrl.contains("?")) {
@@ -658,7 +723,12 @@ object LocalMediaProxy {
                             if (registeredHeaders != null) {
                                 registerUrlHeaders(resolvedUrl, registeredHeaders)
                             }
-                            val subExt = if (resolvedUrl.contains(".m3u8", ignoreCase = true)) "/stream.m3u8" else "/segment.ts"
+                            val subExt = when {
+                                resolvedUrl.contains(".m3u8", ignoreCase = true) -> "/stream.m3u8"
+                                resolvedUrl.contains(".m4s", ignoreCase = true) || resolvedUrl.contains(".mp4", ignoreCase = true) -> "/segment.mp4"
+                                resolvedUrl.contains(".vtt", ignoreCase = true) || resolvedUrl.contains(".webvtt", ignoreCase = true) -> "/subtitles.vtt"
+                                else -> "/segment.ts"
+                            }
                             "$proxyBase$subExt?url=${URLEncoder.encode(resolvedUrl, "UTF-8")}"
                         }
                     }
