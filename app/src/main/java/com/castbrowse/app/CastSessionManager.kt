@@ -165,6 +165,8 @@ object CastSessionManager {
         LocalMediaProxy.start()
         val proxiedUrl = if (LocalMediaProxy.isProxyUrl(mediaUrl)) {
             mediaUrl
+        } else if (device.protocol == CastProtocol.AIRPLAY && !mediaUrl.contains("/local?id=")) {
+            mediaUrl
         } else {
             LocalMediaProxy.getProxyUrl(mediaUrl, receiverIp = device.ipAddress)
         }

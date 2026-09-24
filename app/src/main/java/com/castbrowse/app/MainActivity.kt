@@ -857,6 +857,8 @@ class MainActivity : ComponentActivity() {
             // and preserve leak-proof mobile VPN tunneling for geo/IP-locked content.
             val proxiedUrl = if (videoUrl.contains("/local?id=")) {
                 videoUrl
+            } else if (device.protocol == CastProtocol.AIRPLAY && (headers["Cookie"].isNullOrEmpty() && headers["Referer"].isNullOrEmpty())) {
+                videoUrl
             } else {
                 LocalMediaProxy.getProxyUrl(videoUrl, headers, device.ipAddress)
             }
